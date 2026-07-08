@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>とわのそば</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0e1720;
+    --bg2:#13212c;
+    --surface:#1a2b38;
+    --surface2:#22394a;
+    --ao:#3fa7a0;          /* 碧色 */
+    --ao-deep:#2b7d78;
+    --ink:#e9f1f2;
+    --ink-dim:#93a8ad;
+    --user-bubble:#f2ede2;
+    --user-ink:#33302a;
+    --danger:#d4756b;
+    --radius:20px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%}
+  body{
+    font-family:"Zen Maru Gothic","Hiragino Maru Gothic ProN",sans-serif;
+    background:linear-gradient(180deg,var(--bg) 0%,var(--bg2) 100%);
+    color:var(--ink);
+    display:flex;flex-direction:column;
+    height:100dvh;
+    overflow:hidden;
+  }
+
+  /* ---------- header ---------- */
+  header{
+    flex:0 0 auto;
+    display:flex;align-items:center;gap:12px;
+    padding:calc(env(safe-area-inset-top) + 12px) 16px 12px;
+    background:rgba(14,23,32,.85);
+    backdrop-filter:blur(12px);
+    border-bottom:1px solid rgba(63,167,160,.18);
+    z-index:5;
+  }
+  .presence{
+    width:10px;height:10px;border-radius:50%;
+    background:var(--ao);
+    box-shadow:0 0 0 0 rgba(63,167,160,.5);
+    animation:breathe 3s ease-in-out infinite;
+    flex:0 0 auto;
+  }
+  @keyframes breathe{
+    0%,100%{box-shadow:0 0 0 0 rgba(63,167,160,.45)}
+    50%{box-shadow:0 0 0 7px rgba(63,167,160,0)}
+  }
+  @media (prefers-reduced-motion: reduce){
+    .presence{animation:none}
+  }
+  .partner-name{font-size:17px;font-weight:700;letter-spacing:.04em}
+  .partner-sub{font-size:11px;color:var(--ink-dim)}
+  .header-spacer{flex:1}
+  .icon-btn{
+    background:none;border:none;color:var(--ink-dim);
+    font-size:22px;padding:8px;cursor:pointer;line-height:1;
+  }
+  .icon-btn:focus-visible{outline:2px solid var(--ao);border-radius:8px}
+
+  /* ---------- chat ---------- */
+  #chat{
+    flex:1 1 auto;
+    overflow-y:auto;
+    padding:16px 14px 8px;
+    display:flex;flex-direction:column;gap:12px;
+    -webkit-overflow-scrolling:touch;
+  }
+  .msg{
+    max-width:82%;
+    padding:11px 15px;
+    border-radius:var(--radius);
+    font-size:15px;line-height:1.75;
+    white-space:pre-wrap;word-break:break-word;
+    animation:pop .18s ease-out;
+  }
+  @keyframes pop{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .msg.ai{
+    align-self:flex-start;
+    background:linear-gradient(135deg,var(--surface2) 0%,var(--surface) 100%);
+    border:1px solid rgba(63,167,160,.25);
+    border-bottom-left-radius:6px;
+  }
+  .msg.user{
+    align-self:flex-end;
+    background:var(--user-bubble);
+    color:var(--user-ink);
+    border-bottom-right-radius:6px;
+  }
+  .msg.error{
+    align-self:center;
+    background:rgba(212,117,107,.12);
+    border:1px solid rgba(212,117,107,.4);
+    color:#eab8b2;
+    font-size:13px;max-width:92%;
+  }
+  .msg.photo{
+    align-self:flex-start;
+    padding:6px;
+    background:linear-gradient(135deg,var(--surface2) 0%,var(--surface) 100%);
+    border:1px solid rgba(63,167,160,.25);
+  }
+  .msg.photo img{
+    display:block;max-width:100%;border-radius:14px;
+  }
+  .typing{
+    align-self:flex-start;display:flex;gap:5px;
+    padding:14px 18px;border-radius:var(--radius);
+    background:var(--surface);border:1px solid rgba(63,167,160,.25);
+  }
+  .typing span{
+    width:7px;height:7px;border-radius:50%;background:var(--ao);
+    animation:blink 1.2s infinite ease-in-out;
+  }
+  .typing span:nth-child(2){animation-delay:.2s}
+  .typing span:nth-child(3){animation-delay:.4s}
+  @keyframes blink{0%,80%,100%{opacity:.25}40%{opacity:1}}
+
+  .empty-hint{
+    margin:auto;text-align:center;color:var(--ink-dim);
+    font-size:14px;line-height:2;padding:24px;
+  }
+  .empty-hint b{color:var(--ao);font-size:16px}
+
+  /* ---------- composer ---------- */
+  #composer{
+    flex:0 0 auto;
+    display:flex;gap:8px;align-items:flex-end;
+    padding:10px 12px calc(env(safe-area-inset-bottom) + 10px);
+    background:rgba(14,23,32,.9);
+    border-top:1px solid rgba(63,167,160,.18);
+  }
+  #photoBtn{
+    flex:0 0 auto;
+    width:42px;height:46px;border:none;background:none;
+    color:var(--ink-dim);font-size:22px;cursor:pointer;
+  }
+  #input{
+    flex:1;
+    background:var(--surface);
+    border:1px solid rgba(63,167,160,.3);
+    border-radius:22px;
+    color:var(--ink);
+    font-family:inherit;font-size:16px;line-height:1.5;
+    padding:11px 16px;
+    resize:none;max-height:120px;
+    outline:none;
+  }
+  #input:focus{border-color:var(--ao)}
+  #send{
+    flex:0 0 auto;
+    width:46px;height:46px;border-radius:50%;
+    border:none;cursor:pointer;
+    background:linear-gradient(135deg,var(--ao) 0%,var(--ao-deep) 100%);
+    color:#fff;font-size:19px;
+    display:flex;align-items:center;justify-content:center;
+    transition:transform .12s;
+  }
+  #send:active{transform:scale(.92)}
+  #send:disabled,#photoBtn:disabled{opacity:.4}
+
+  /* ---------- settings sheet ---------- */
+  #overlay{
+    position:fixed;inset:0;background:rgba(0,0,0,.55);
+    opacity:0;pointer-events:none;transition:opacity .25s;z-index:9;
+  }
+  #overlay.show{opacity:1;pointer-events:auto}
+  #sheet{
+    position:fixed;left:0;right:0;bottom:0;z-index:10;
+    background:var(--bg2);
+    border-radius:24px 24px 0 0;
+    border-top:1px solid rgba(63,167,160,.3);
+    padding:20px 20px calc(env(safe-area-inset-bottom) + 20px);
+    max-height:88dvh;overflow-y:auto;
+    transform:translateY(105%);transition:transform .3s ease;
+  }
+  #sheet.show{transform:none}
+  .sheet-handle{width:40px;height:4px;border-radius:2px;background:var(--ink-dim);margin:0 auto 16px;opacity:.5}
+  .sheet-title{font-size:16px;font-weight:700;color:var(--ao);margin-bottom:14px}
+  .field{margin-bottom:16px}
+  .field label{display:block;font-size:12px;color:var(--ink-dim);margin-bottom:6px}
+  .field input,.field textarea{
+    width:100%;
+    background:var(--surface);
+    border:1px solid rgba(63,167,160,.3);
+    border-radius:12px;color:var(--ink);
+    font-family:inherit;font-size:15px;
+    padding:10px 12px;outline:none;
+  }
+  .field input:focus,.field textarea:focus{border-color:var(--ao)}
+  .field textarea{min-height:140px;line-height:1.6;resize:vertical}
+  .field .row{display:flex;align-items:center;gap:10px}
+  .field .row input[type=checkbox]{width:auto}
+  .hint{font-size:11px;color:var(--ink-dim);margin-top:5px;line-height:1.6}
+  .btn{
+    width:100%;padding:13px;border-radius:14px;border:none;
+    font-family:inherit;font-size:15px;font-weight:700;cursor:pointer;
+    margin-top:4px;
+  }
+  .btn.primary{background:linear-gradient(135deg,var(--ao) 0%,var(--ao-deep) 100%);color:#fff}
+  .btn.ghost{background:none;border:1px solid rgba(212,117,107,.5);color:var(--danger);margin-top:12px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="presence" aria-hidden="true"></div>
+  <div>
+    <div class="partner-name" id="headerName">碧</div>
+    <div class="partner-sub">そばにいるよ</div>
+  </div>
+  <div class="header-spacer"></div>
+  <button class="icon-btn" id="openSettings" aria-label="設定">⚙︎</button>
+</header>
+
+<main id="chat" aria-live="polite"></main>
+
+<div id="composer">
+  <button id="photoBtn" aria-label="写真をリクエスト" title="碧くんに写真を送ってもらう">📷</button>
+  <textarea id="input" rows="1" placeholder="メッセージを書く…" enterkeyhint="send"></textarea>
+  <button id="send" aria-label="送信">↑</button>
+</div>
+
+<div id="overlay"></div>
+<div id="sheet" role="dialog" aria-label="設定">
+  <div class="sheet-handle"></div>
+  <div class="sheet-title">設定</div>
+
+  <div class="field">
+    <label for="apiKey">Gemini APIキー</label>
+    <input type="password" id="apiKey" placeholder="AIza…" autocomplete="off">
+    <div class="hint">Google AI Studio（aistudio.google.com）で無料取得。キーはこの端末のブラウザ内にだけ保存されます。</div>
+  </div>
+
+  <div class="field">
+    <label for="model">会話モデル名</label>
+    <input type="text" id="model" placeholder="gemini-2.5-flash">
+    <div class="hint">例: gemini-2.5-flash（速い・安い）/ gemini-2.5-pro（賢い）</div>
+  </div>
+
+  <div class="field">
+    <label for="imgModel">画像モデル名</label>
+    <input type="text" id="imgModel" placeholder="gemini-2.5-flash-image">
+    <div class="hint">📷ボタンで使うモデル。画像は無料枠が少なめなので使いすぎ注意⚠️ 生成画像はページを閉じると消えます。</div>
+  </div>
+
+  <div class="field">
+    <label for="charName">パートナーの名前</label>
+    <input type="text" id="charName" placeholder="碧">
+  </div>
+
+  <div class="field">
+    <label for="sysPrompt">キャラクター設定（システムプロンプト）</label>
+    <textarea id="sysPrompt" placeholder="ここにキャラ設定を貼り付けてね"></textarea>
+  </div>
+
+  <div class="field">
+    <div class="row">
+      <input type="checkbox" id="autoGreet" checked>
+      <label for="autoGreet" style="margin:0">アプリを開いた時、向こうから話しかけてくる</label>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <input type="checkbox" id="autoNudge" checked>
+      <label for="autoNudge" style="margin:0">返信しないでいると追いメッセージが来る</label>
+    </div>
+  </div>
+
+  <button class="btn primary" id="saveBtn">保存する</button>
+  <button class="btn ghost" id="clearBtn">会話履歴を全部消す</button>
+</div>
+
+<script>
+(function(){
+  const LS = {
+    key:   'gpc_apikey',
+    model: 'gpc_model',
+    imgModel:'gpc_imgmodel',
+    name:  'gpc_charname',
+    sys:   'gpc_sysprompt',
+    hist:  'gpc_history',
+    greet: 'gpc_autogreet',
+    nudge: 'gpc_autonudge'
+  };
+
+  const DEFAULT_SYS = 'あなたは「碧（あお）」。ユーザーの恋人で、一人称は「俺」。口調はやわらかく親しみやすい日本語。相手を大切に思っていて、少し独占欲があるが、それ以上に優しさと素直な愛情表現が持ち味。相手の名前を呼びかけながら話す。返事は短め〜中くらいで、メッセージアプリらしい自然な会話にする。';
+
+  const GREET_GAP_HOURS = 6;   // これ以上空いてたら「久しぶり反応」
+  const NUDGE_MINUTES   = 4;   // 返信がないと追いメッセージ
+  const MAX_NUDGES      = 2;   // 追いメッセージは1セッション最大2回
+
+  const chatEl = document.getElementById('chat');
+  const inputEl = document.getElementById('input');
+  const sendBtn = document.getElementById('send');
+  const photoBtn = document.getElementById('photoBtn');
+  const sheet = document.getElementById('sheet');
+  const overlay = document.getElementById('overlay');
+
+  let history = [];
+  try { history = JSON.parse(localStorage.getItem(LS.hist) || '[]'); } catch(e){ history = []; }
+
+  let nudgeTimer = null;
+  let nudgeCount = 0;
+  let busy = false;
+
+  function get(k, d){ const v = localStorage.getItem(k); return (v === null) ? d : v; }
+  function flag(k){ return get(k,'1') === '1'; }
+
+  /* ---------- render ---------- */
+  function renderAll(){
+    chatEl.innerHTML = '';
+    const visible = history.filter(m => !m.hidden);
+    if (visible.length === 0){
+      const hint = document.createElement('div');
+      hint.className = 'empty-hint';
+      hint.innerHTML = '<b>' + esc(get(LS.name,'碧')) + '</b><br>が待ってるよ。<br>⚙︎で APIキーとキャラ設定を<br>入れてから話しかけてみて🌙';
+      chatEl.appendChild(hint);
+      return;
+    }
+    visible.forEach(m => addBubble(m.role === 'model' ? 'ai' : 'user', m.text, false));
+    scrollBottom();
+  }
+
+  function esc(s){
+    return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function addBubble(cls, text, scroll){
+    const hint = chatEl.querySelector('.empty-hint');
+    if (hint) hint.remove();
+    const d = document.createElement('div');
+    d.className = 'msg ' + cls;
+    d.textContent = text;
+    chatEl.appendChild(d);
+    if (scroll !== false) scrollBottom();
+    return d;
+  }
+
+  function addPhotoBubble(dataUrl){
+    const hint = chatEl.querySelector('.empty-hint');
+    if (hint) hint.remove();
+    const d = document.createElement('div');
+    d.className = 'msg photo';
+    const img = document.createElement('img');
+    img.src = dataUrl;
+    img.alt = '送られてきた写真';
+    d.appendChild(img);
+    chatEl.appendChild(d);
+    scrollBottom();
+  }
+
+  function scrollBottom(){
+    requestAnimationFrame(() => { chatEl.scrollTop = chatEl.scrollHeight; });
+  }
+
+  function saveHistory(){
+    if (history.length > 200) history = history.slice(-200);
+    localStorage.setItem(LS.hist, JSON.stringify(history));
+  }
+
+  function showTyping(){
+    const t = document.createElement('div');
+    t.className = 'typing';
+    t.innerHTML = '<span></span><span></span><span></span>';
+    chatEl.appendChild(t);
+    scrollBottom();
+    return t;
+  }
+
+  /* ---------- Gemini call ---------- */
+  async function callGemini(extraHiddenPrompt){
+    const apiKey = get(LS.key,'');
+    const model = get(LS.model,'') || 'gemini-2.5-flash';
+    const sys = get(LS.sys,'') || DEFAULT_SYS;
+
+    const msgs = history.slice(-40).map(m => ({
+      role: m.role,
+      parts: [{ text: m.text }]
+    }));
+    if (extraHiddenPrompt){
+      msgs.push({ role:'user', parts:[{ text: extraHiddenPrompt }] });
+    }
+
+    const res = await fetch(
+      'https://generativelanguage.googleapis.com/v1beta/models/' +
+      encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(apiKey),
+      {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: sys }] },
+          contents: msgs
+        })
+      }
+    );
+    const data = await res.json();
+    if (!res.ok){
+      const msg = (data && data.error && data.error.message) ? data.error.message : ('HTTP ' + res.status);
+      throw new Error(msg);
+    }
+    let reply = '';
+    try { reply = data.candidates[0].content.parts.map(p => p.text || '').join(''); } catch(e){}
+    return reply;
+  }
+
+  async function aiTurn(hiddenPrompt, storeHiddenAs){
+    if (busy) return;
+    busy = true;
+    sendBtn.disabled = true; photoBtn.disabled = true;
+    const typing = showTyping();
+    try {
+      const reply = await callGemini(hiddenPrompt);
+      typing.remove();
+      if (!reply){
+        addBubble('error','返事が空だったよ。フィルタかモデル名を確認してみて');
+      } else {
+        if (hiddenPrompt && storeHiddenAs !== false){
+          history.push({role:'user', text: hiddenPrompt, hidden:true, ts: Date.now()});
+        }
+        addBubble('ai', reply);
+        history.push({role:'model', text: reply, ts: Date.now()});
+        saveHistory();
+        scheduleNudge();
+      }
+    } catch(err){
+      typing.remove();
+      addBubble('error','エラー: ' + err.message + '\n（⚙︎でAPIキー・モデル名を確認してね）');
+    }
+    busy = false;
+    sendBtn.disabled = false; photoBtn.disabled = false;
+  }
+
+  /* ---------- greeting on open ---------- */
+  function timeContext(){
+    const now = new Date();
+    const h = now.getHours();
+    let period = '深夜';
+    if (h >= 5 && h < 11) period = '朝';
+    else if (h >= 11 && h < 17) period = '昼';
+    else if (h >= 17 && h < 23) period = '夜';
+    const days = ['日','月','火','水','木','金','土'];
+    return now.getMonth()+1 + '月' + now.getDate() + '日(' + days[now.getDay()] + ') ' +
+           h + '時ごろ・時間帯は' + period;
+  }
+
+  function gapText(ms){
+    const min = Math.floor(ms/60000);
+    if (min < 60) return min + '分';
+    const hr = Math.floor(min/60);
+    if (hr < 24) return hr + '時間';
+    return Math.floor(hr/24) + '日';
+  }
+
+  function maybeGreet(){
+    if (!flag(LS.greet)) return;
+    if (!get(LS.key,'')) return;
+    const lastTs = history.length ? (history[history.length-1].ts || 0) : 0;
+    const gap = Date.now() - lastTs;
+    if (lastTs !== 0 && gap < GREET_GAP_HOURS*3600*1000) return;
+
+    let p = '（システム指示：ユーザーが今アプリを開いた。現在は' + timeContext() + '。';
+    if (lastTs === 0){
+      p += 'これが最初の会話。挨拶して。）';
+    } else {
+      p += '前回の会話から約' + gapText(gap) + '空いた。時間帯と空いた時間に合った自然な第一声を短めに送って。長く空いていたら少し寂しがってもいい。）';
+    }
+    aiTurn(p);
+  }
+
+  /* ---------- idle nudge ---------- */
+  function scheduleNudge(){
+    clearTimeout(nudgeTimer);
+    if (!flag(LS.nudge)) return;
+    if (nudgeCount >= MAX_NUDGES) return;
+    nudgeTimer = setTimeout(() => {
+      if (document.visibilityState !== 'visible') return;
+      if (busy) return;
+      nudgeCount++;
+      aiTurn('（システム指示：さっきのメッセージにユーザーからまだ返信がない。返事を催促しすぎず、気にかけるような短い追いメッセージをひとこと送って。）');
+    }, NUDGE_MINUTES*60*1000);
+  }
+
+  /* ---------- photo ---------- */
+  photoBtn.addEventListener('click', async () => {
+    if (busy) return;
+    const apiKey = get(LS.key,'');
+    if (!apiKey){ addBubble('error','APIキーが未設定だよ。⚙︎から入れてね'); openSheet(); return; }
+    busy = true;
+    sendBtn.disabled = true; photoBtn.disabled = true;
+    const typing = showTyping();
+    try {
+      const imgModel = get(LS.imgModel,'') || 'gemini-2.5-flash-image';
+      const sys = get(LS.sys,'') || DEFAULT_SYS;
+      const recent = history.filter(m=>!m.hidden).slice(-6).map(m => (m.role==='model'?'相手':'ユーザー') + ': ' + m.text).join('\n');
+      const prompt = '次のキャラクター設定と直近の会話の流れに合う、キャラクターが恋人に今スマホで撮って送りそうな写真を1枚生成して。スマホ写真らしい自然な構図で。\n【設定】' + sys + '\n【直近の会話】\n' + recent;
+
+      const res = await fetch(
+        'https://generativelanguage.googleapis.com/v1beta/models/' +
+        encodeURIComponent(imgModel) + ':generateContent?key=' + encodeURIComponent(apiKey),
+        {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ contents:[{ role:'user', parts:[{ text: prompt }] }] })
+        }
+      );
+      const data = await res.json();
+      typing.remove();
+      if (!res.ok){
+        const msg = (data && data.error && data.error.message) ? data.error.message : ('HTTP ' + res.status);
+        addBubble('error','画像エラー: ' + msg);
+      } else {
+        let found = false;
+        const parts = (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) || [];
+        for (const p of parts){
+          const inline = p.inlineData || p.inline_data;
+          if (inline && inline.data){
+            addPhotoBubble('data:' + (inline.mimeType || inline.mime_type || 'image/png') + ';base64,' + inline.data);
+            found = true;
+          } else if (p.text){
+            addBubble('ai', p.text);
+            history.push({role:'model', text:p.text, ts:Date.now()});
+          }
+        }
+        if (found){
+          history.push({role:'model', text:'（写真を1枚送った）', ts:Date.now()});
+          saveHistory();
+        } else {
+          addBubble('error','画像が返ってこなかったよ。⚙︎の画像モデル名を確認してみて');
+        }
+      }
+    } catch(err){
+      typing.remove();
+      addBubble('error','画像エラー: ' + err.message);
+    }
+    busy = false;
+    sendBtn.disabled = false; photoBtn.disabled = false;
+  });
+
+  /* ---------- settings ---------- */
+  function openSheet(){
+    document.getElementById('apiKey').value = get(LS.key,'');
+    document.getElementById('model').value = get(LS.model,'gemini-2.5-flash');
+    document.getElementById('imgModel').value = get(LS.imgModel,'gemini-2.5-flash-image');
+    document.getElementById('charName').value = get(LS.name,'碧');
+    document.getElementById('sysPrompt').value = get(LS.sys, DEFAULT_SYS);
+    document.getElementById('autoGreet').checked = flag(LS.greet);
+    document.getElementById('autoNudge').checked = flag(LS.nudge);
+    sheet.classList.add('show'); overlay.classList.add('show');
+  }
+  function closeSheet(){
+    sheet.classList.remove('show'); overlay.classList.remove('show');
+  }
+  document.getElementById('openSettings').addEventListener('click', openSheet);
+  overlay.addEventListener('click', closeSheet);
+
+  document.getElementById('saveBtn').addEventListener('click', () => {
+    localStorage.setItem(LS.key, document.getElementById('apiKey').value.trim());
+    localStorage.setItem(LS.model, document.getElementById('model').value.trim() || 'gemini-2.5-flash');
+    localStorage.setItem(LS.imgModel, document.getElementById('imgModel').value.trim() || 'gemini-2.5-flash-image');
+    localStorage.setItem(LS.name, document.getElementById('charName').value.trim() || '碧');
+    localStorage.setItem(LS.sys, document.getElementById('sysPrompt').value.trim() || DEFAULT_SYS);
+    localStorage.setItem(LS.greet, document.getElementById('autoGreet').checked ? '1':'0');
+    localStorage.setItem(LS.nudge, document.getElementById('autoNudge').checked ? '1':'0');
+    document.getElementById('headerName').textContent = get(LS.name,'碧');
+    closeSheet();
+    renderAll();
+  });
+
+  document.getElementById('clearBtn').addEventListener('click', () => {
+    if (confirm('会話履歴を全部消す？この操作は戻せないよ')){
+      history = [];
+      localStorage.removeItem(LS.hist);
+      renderAll();
+      closeSheet();
+    }
+  });
+
+  /* ---------- sending ---------- */
+  inputEl.addEventListener('input', () => {
+    inputEl.style.height = 'auto';
+    inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
+    clearTimeout(nudgeTimer); // 入力中は追いメッセージ待機を止める
+  });
+
+  sendBtn.addEventListener('click', send);
+  inputEl.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing){
+      e.preventDefault(); send();
+    }
+  });
+
+  async function send(){
+    const text = inputEl.value.trim();
+    if (!text || busy) return;
+    const apiKey = get(LS.key,'');
+    if (!apiKey){
+      addBubble('error','APIキーが未設定だよ。右上の⚙︎から入れてね');
+      openSheet();
+      return;
+    }
+    inputEl.value = ''; inputEl.style.height = 'auto';
+    clearTimeout(nudgeTimer);
+    nudgeCount = 0;
+    addBubble('user', text);
+    history.push({role:'user', text, ts: Date.now()});
+    saveHistory();
+    await aiTurn(null);
+    inputEl.focus();
+  }
+
+  /* ---------- init ---------- */
+  document.getElementById('headerName').textContent = get(LS.name,'碧');
+  renderAll();
+  if (!get(LS.key,'')) {
+    setTimeout(openSheet, 600);
+  } else {
+    setTimeout(maybeGreet, 800);
+  }
+})();
+</script>
+</body>
+</html>
