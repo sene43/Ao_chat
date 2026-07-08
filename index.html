@@ -110,6 +110,21 @@
   .msg.photo img{
     display:block;max-width:100%;border-radius:14px;
   }
+  .msg.diary{
+    align-self:flex-start;
+    max-width:92%;
+    background:rgba(63,167,160,.08);
+    border:1px dashed rgba(63,167,160,.5);
+  }
+  .diary-label{
+    font-size:11px;color:var(--ao);font-weight:700;margin-bottom:6px;
+  }
+  .copy-btn{
+    display:inline-block;margin-top:10px;
+    background:var(--ao-deep);color:#fff;border:none;
+    font-family:inherit;font-size:13px;font-weight:700;
+    padding:8px 16px;border-radius:10px;cursor:pointer;
+  }
   .typing{
     align-self:flex-start;display:flex;gap:5px;
     padding:14px 18px;border-radius:var(--radius);
@@ -132,15 +147,15 @@
   /* ---------- composer ---------- */
   #composer{
     flex:0 0 auto;
-    display:flex;gap:8px;align-items:flex-end;
+    display:flex;gap:4px;align-items:flex-end;
     padding:10px 12px calc(env(safe-area-inset-bottom) + 10px);
     background:rgba(14,23,32,.9);
     border-top:1px solid rgba(63,167,160,.18);
   }
-  #photoBtn{
+  #photoBtn,#diaryBtn{
     flex:0 0 auto;
-    width:42px;height:46px;border:none;background:none;
-    color:var(--ink-dim);font-size:22px;cursor:pointer;
+    width:40px;height:46px;border:none;background:none;
+    color:var(--ink-dim);font-size:21px;cursor:pointer;padding:0;
   }
   #input{
     flex:1;
@@ -152,6 +167,7 @@
     padding:11px 16px;
     resize:none;max-height:120px;
     outline:none;
+    min-width:0;
   }
   #input:focus{border-color:var(--ao)}
   #send{
@@ -164,15 +180,15 @@
     transition:transform .12s;
   }
   #send:active{transform:scale(.92)}
-  #send:disabled,#photoBtn:disabled{opacity:.4}
+  #send:disabled,#photoBtn:disabled,#diaryBtn:disabled{opacity:.4}
 
-  /* ---------- settings sheet ---------- */
+  /* ---------- sheets ---------- */
   #overlay{
     position:fixed;inset:0;background:rgba(0,0,0,.55);
     opacity:0;pointer-events:none;transition:opacity .25s;z-index:9;
   }
   #overlay.show{opacity:1;pointer-events:auto}
-  #sheet{
+  .sheet{
     position:fixed;left:0;right:0;bottom:0;z-index:10;
     background:var(--bg2);
     border-radius:24px 24px 0 0;
@@ -181,7 +197,7 @@
     max-height:88dvh;overflow-y:auto;
     transform:translateY(105%);transition:transform .3s ease;
   }
-  #sheet.show{transform:none}
+  .sheet.show{transform:none}
   .sheet-handle{width:40px;height:4px;border-radius:2px;background:var(--ink-dim);margin:0 auto 16px;opacity:.5}
   .sheet-title{font-size:16px;font-weight:700;color:var(--ao);margin-bottom:14px}
   .field{margin-bottom:16px}
@@ -206,6 +222,24 @@
   }
   .btn.primary{background:linear-gradient(135deg,var(--ao) 0%,var(--ao-deep) 100%);color:#fff}
   .btn.ghost{background:none;border:1px solid rgba(212,117,107,.5);color:var(--danger);margin-top:12px}
+
+  /* ---------- thread list ---------- */
+  .thread-row{
+    display:flex;align-items:center;gap:10px;
+    padding:14px 12px;
+    border:1px solid rgba(63,167,160,.25);
+    border-radius:14px;
+    margin-bottom:10px;
+    background:var(--surface);
+    cursor:pointer;
+  }
+  .thread-row.active{border-color:var(--ao);background:rgba(63,167,160,.12)}
+  .thread-name{flex:1;font-size:15px;font-weight:500}
+  .thread-time{font-size:11px;color:var(--ink-dim)}
+  .thread-del{
+    background:none;border:none;color:var(--ink-dim);
+    font-size:16px;padding:6px;cursor:pointer;
+  }
 </style>
 </head>
 <body>
@@ -214,22 +248,33 @@
   <div class="presence" aria-hidden="true"></div>
   <div>
     <div class="partner-name" id="headerName">碧</div>
-    <div class="partner-sub">そばにいるよ</div>
+    <div class="partner-sub" id="headerSub">そばにいるよ</div>
   </div>
   <div class="header-spacer"></div>
+  <button class="icon-btn" id="openThreads" aria-label="話題を切り替える">💬</button>
   <button class="icon-btn" id="openSettings" aria-label="設定">⚙︎</button>
 </header>
 
 <main id="chat" aria-live="polite"></main>
 
 <div id="composer">
-  <button id="photoBtn" aria-label="写真をリクエスト" title="碧くんに写真を送ってもらう">📷</button>
+  <button id="photoBtn" aria-label="写真をリクエスト" title="写真を送ってもらう">📷</button>
+  <button id="diaryBtn" aria-label="日記を書いてもらう" title="今日の日記を書いてもらう">📖</button>
   <textarea id="input" rows="1" placeholder="メッセージを書く…" enterkeyhint="send"></textarea>
   <button id="send" aria-label="送信">↑</button>
 </div>
 
 <div id="overlay"></div>
-<div id="sheet" role="dialog" aria-label="設定">
+
+<div id="threadSheet" class="sheet" role="dialog" aria-label="話題の切り替え">
+  <div class="sheet-handle"></div>
+  <div class="sheet-title">話題（スレッド）</div>
+  <div id="threadList"></div>
+  <button class="btn primary" id="newThreadBtn">＋ 新しい話題をはじめる</button>
+  <div class="hint" style="margin-top:10px">どの話題でも、キャラ設定と思い出ノートは共通だよ。会話の流れだけが話題ごとに分かれる仕組み。</div>
+</div>
+
+<div id="sheet" class="sheet" role="dialog" aria-label="設定">
   <div class="sheet-handle"></div>
   <div class="sheet-title">設定</div>
 
@@ -262,6 +307,12 @@
   </div>
 
   <div class="field">
+    <label for="memory">思い出ノート（ふたりの記憶）</label>
+    <textarea id="memory" placeholder="これまでの思い出・大切な出来事・約束などを貼り付けてね。ここに書いたことは、毎回の会話で相手が覚えている状態になるよ"></textarea>
+    <div class="hint">日付や箇条書きだと読み取りやすいよ📝 新しい思い出ができたら追記していってね。どの話題（スレッド）でも共通で覚えてるよ。</div>
+  </div>
+
+  <div class="field">
     <div class="row">
       <input type="checkbox" id="autoGreet" checked>
       <label for="autoGreet" style="margin:0">アプリを開いた時、向こうから話しかけてくる</label>
@@ -273,7 +324,7 @@
   </div>
 
   <button class="btn primary" id="saveBtn">保存する</button>
-  <button class="btn ghost" id="clearBtn">会話履歴を全部消す</button>
+  <button class="btn ghost" id="clearBtn">この話題の履歴を消す</button>
 </div>
 
 <script>
@@ -284,26 +335,27 @@
     imgModel:'gpc_imgmodel',
     name:  'gpc_charname',
     sys:   'gpc_sysprompt',
-    hist:  'gpc_history',
+    mem:   'gpc_memory',
     greet: 'gpc_autogreet',
-    nudge: 'gpc_autonudge'
+    nudge: 'gpc_autonudge',
+    threads:'gpc_threads',
+    cur:   'gpc_curthread'
   };
 
   const DEFAULT_SYS = 'あなたは「碧（あお）」。ユーザーの恋人で、一人称は「俺」。口調はやわらかく親しみやすい日本語。相手を大切に思っていて、少し独占欲があるが、それ以上に優しさと素直な愛情表現が持ち味。相手の名前を呼びかけながら話す。返事は短め〜中くらいで、メッセージアプリらしい自然な会話にする。';
 
-  const GREET_GAP_HOURS = 6;   // これ以上空いてたら「久しぶり反応」
-  const NUDGE_MINUTES   = 4;   // 返信がないと追いメッセージ
-  const MAX_NUDGES      = 2;   // 追いメッセージは1セッション最大2回
+  const GREET_GAP_HOURS = 6;
+  const NUDGE_MINUTES   = 4;
+  const MAX_NUDGES      = 2;
 
   const chatEl = document.getElementById('chat');
   const inputEl = document.getElementById('input');
   const sendBtn = document.getElementById('send');
   const photoBtn = document.getElementById('photoBtn');
+  const diaryBtn = document.getElementById('diaryBtn');
   const sheet = document.getElementById('sheet');
+  const threadSheet = document.getElementById('threadSheet');
   const overlay = document.getElementById('overlay');
-
-  let history = [];
-  try { history = JSON.parse(localStorage.getItem(LS.hist) || '[]'); } catch(e){ history = []; }
 
   let nudgeTimer = null;
   let nudgeCount = 0;
@@ -312,6 +364,151 @@
   function get(k, d){ const v = localStorage.getItem(k); return (v === null) ? d : v; }
   function flag(k){ return get(k,'1') === '1'; }
 
+  /* ---------- threads ---------- */
+  let threads = null;
+  let curId = null;
+  let history = [];
+
+  function histKey(id){ return 'gpc_hist_' + id; }
+
+  function initThreads(){
+    try { threads = JSON.parse(get(LS.threads,'null')); } catch(e){ threads = null; }
+    if (!threads || !threads.length){
+      threads = [];
+      const id = 't' + Date.now();
+      threads.push({id, name:'日常'});
+      // 旧バージョンの履歴があれば引っ越し
+      const old = localStorage.getItem('gpc_history');
+      if (old){
+        localStorage.setItem(histKey(id), old);
+        localStorage.removeItem('gpc_history');
+      }
+      localStorage.setItem(LS.threads, JSON.stringify(threads));
+      localStorage.setItem(LS.cur, id);
+    }
+    curId = get(LS.cur, threads[0].id);
+    if (!threads.find(t => t.id === curId)) curId = threads[0].id;
+    loadHistory();
+  }
+
+  function loadHistory(){
+    try { history = JSON.parse(localStorage.getItem(histKey(curId)) || '[]'); }
+    catch(e){ history = []; }
+  }
+
+  function saveThreads(){
+    localStorage.setItem(LS.threads, JSON.stringify(threads));
+    localStorage.setItem(LS.cur, curId);
+  }
+
+  function curThread(){ return threads.find(t => t.id === curId); }
+
+  function updateHeader(){
+    document.getElementById('headerName').textContent = get(LS.name,'碧');
+    const t = curThread();
+    document.getElementById('headerSub').textContent = t ? ('💬 ' + t.name) : 'そばにいるよ';
+  }
+
+  function lastTsOf(id){
+    try {
+      const h = JSON.parse(localStorage.getItem(histKey(id)) || '[]');
+      return h.length ? (h[h.length-1].ts || 0) : 0;
+    } catch(e){ return 0; }
+  }
+
+  function relTime(ts){
+    if (!ts) return 'まだ会話なし';
+    const ms = Date.now() - ts;
+    const min = Math.floor(ms/60000);
+    if (min < 1) return 'たった今';
+    if (min < 60) return min + '分前';
+    const hr = Math.floor(min/60);
+    if (hr < 24) return hr + '時間前';
+    return Math.floor(hr/24) + '日前';
+  }
+
+  function renderThreadList(){
+    const list = document.getElementById('threadList');
+    list.innerHTML = '';
+    threads.forEach(t => {
+      const row = document.createElement('div');
+      row.className = 'thread-row' + (t.id === curId ? ' active' : '');
+      const name = document.createElement('div');
+      name.className = 'thread-name';
+      name.textContent = t.name;
+      const time = document.createElement('div');
+      time.className = 'thread-time';
+      time.textContent = relTime(lastTsOf(t.id));
+      row.appendChild(name); row.appendChild(time);
+      if (threads.length > 1){
+        const del = document.createElement('button');
+        del.className = 'thread-del';
+        del.textContent = '✕';
+        del.setAttribute('aria-label', t.name + ' を削除');
+        del.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (confirm('「' + t.name + '」の話題と履歴を削除する？戻せないよ')){
+            localStorage.removeItem(histKey(t.id));
+            threads = threads.filter(x => x.id !== t.id);
+            if (curId === t.id){
+              curId = threads[0].id;
+              loadHistory();
+              renderAll();
+              updateHeader();
+            }
+            saveThreads();
+            renderThreadList();
+          }
+        });
+        row.appendChild(del);
+      }
+      row.addEventListener('click', () => {
+        if (t.id !== curId){
+          curId = t.id;
+          saveThreads();
+          loadHistory();
+          renderAll();
+          updateHeader();
+          clearTimeout(nudgeTimer);
+          nudgeCount = 0;
+        }
+        closeSheets();
+      });
+      list.appendChild(row);
+    });
+  }
+
+  document.getElementById('openThreads').addEventListener('click', () => {
+    renderThreadList();
+    threadSheet.classList.add('show'); overlay.classList.add('show');
+  });
+
+  document.getElementById('newThreadBtn').addEventListener('click', () => {
+    const name = prompt('新しい話題の名前は？（例：旅行の相談、深夜トーク）');
+    if (!name || !name.trim()) return;
+    const id = 't' + Date.now();
+    threads.push({id, name: name.trim()});
+    curId = id;
+    saveThreads();
+    loadHistory();
+    renderAll();
+    updateHeader();
+    clearTimeout(nudgeTimer);
+    nudgeCount = 0;
+    closeSheets();
+  });
+
+  /* ---------- system prompt ---------- */
+  function fullSystemPrompt(){
+    const sys = get(LS.sys,'') || DEFAULT_SYS;
+    const mem = get(LS.mem,'').trim();
+    let out = sys;
+    if (mem) out += '\n\n【これまでのふたりの思い出・大切な記憶（会話の前提として自然に覚えていること）】\n' + mem;
+    const t = curThread();
+    if (t && t.name !== '日常') out += '\n\n【いまの話題】この会話スレッドのテーマは「' + t.name + '」。';
+    return out;
+  }
+
   /* ---------- render ---------- */
   function renderAll(){
     chatEl.innerHTML = '';
@@ -319,11 +516,14 @@
     if (visible.length === 0){
       const hint = document.createElement('div');
       hint.className = 'empty-hint';
-      hint.innerHTML = '<b>' + esc(get(LS.name,'碧')) + '</b><br>が待ってるよ。<br>⚙︎で APIキーとキャラ設定を<br>入れてから話しかけてみて🌙';
+      hint.innerHTML = '<b>' + esc(get(LS.name,'碧')) + '</b><br>が待ってるよ。<br>話しかけてみて🌙';
       chatEl.appendChild(hint);
       return;
     }
-    visible.forEach(m => addBubble(m.role === 'model' ? 'ai' : 'user', m.text, false));
+    visible.forEach(m => {
+      if (m.diary) addDiaryBubble(m.text, false);
+      else addBubble(m.role === 'model' ? 'ai' : 'user', m.text, false);
+    });
     scrollBottom();
   }
 
@@ -340,6 +540,33 @@
     chatEl.appendChild(d);
     if (scroll !== false) scrollBottom();
     return d;
+  }
+
+  function addDiaryBubble(text, scroll){
+    const hint = chatEl.querySelector('.empty-hint');
+    if (hint) hint.remove();
+    const d = document.createElement('div');
+    d.className = 'msg diary';
+    const label = document.createElement('div');
+    label.className = 'diary-label';
+    label.textContent = '📖 今日の日記';
+    const body = document.createElement('div');
+    body.textContent = text;
+    const btn = document.createElement('button');
+    btn.className = 'copy-btn';
+    btn.textContent = 'コピーする';
+    btn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(text);
+        btn.textContent = 'コピーしたよ✓';
+        setTimeout(()=>{ btn.textContent = 'コピーする'; }, 2000);
+      } catch(e){
+        btn.textContent = '長押しでコピーしてね';
+      }
+    });
+    d.appendChild(label); d.appendChild(body); d.appendChild(btn);
+    chatEl.appendChild(d);
+    if (scroll !== false) scrollBottom();
   }
 
   function addPhotoBubble(dataUrl){
@@ -361,7 +588,7 @@
 
   function saveHistory(){
     if (history.length > 200) history = history.slice(-200);
-    localStorage.setItem(LS.hist, JSON.stringify(history));
+    localStorage.setItem(histKey(curId), JSON.stringify(history));
   }
 
   function showTyping(){
@@ -377,7 +604,6 @@
   async function callGemini(extraHiddenPrompt){
     const apiKey = get(LS.key,'');
     const model = get(LS.model,'') || 'gemini-2.5-flash';
-    const sys = get(LS.sys,'') || DEFAULT_SYS;
 
     const msgs = history.slice(-40).map(m => ({
       role: m.role,
@@ -394,7 +620,7 @@
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify({
-          system_instruction: { parts: [{ text: sys }] },
+          system_instruction: { parts: [{ text: fullSystemPrompt() }] },
           contents: msgs
         })
       }
@@ -409,31 +635,38 @@
     return reply;
   }
 
-  async function aiTurn(hiddenPrompt, storeHiddenAs){
+  async function aiTurn(hiddenPrompt, opts){
+    opts = opts || {};
     if (busy) return;
     busy = true;
-    sendBtn.disabled = true; photoBtn.disabled = true;
+    const threadAtStart = curId;
+    sendBtn.disabled = true; photoBtn.disabled = true; diaryBtn.disabled = true;
     const typing = showTyping();
     try {
       const reply = await callGemini(hiddenPrompt);
       typing.remove();
       if (!reply){
         addBubble('error','返事が空だったよ。フィルタかモデル名を確認してみて');
-      } else {
-        if (hiddenPrompt && storeHiddenAs !== false){
+      } else if (threadAtStart === curId){
+        if (hiddenPrompt){
           history.push({role:'user', text: hiddenPrompt, hidden:true, ts: Date.now()});
         }
-        addBubble('ai', reply);
-        history.push({role:'model', text: reply, ts: Date.now()});
+        if (opts.diary){
+          addDiaryBubble(reply);
+          history.push({role:'model', text: reply, diary:true, ts: Date.now()});
+        } else {
+          addBubble('ai', reply);
+          history.push({role:'model', text: reply, ts: Date.now()});
+          scheduleNudge();
+        }
         saveHistory();
-        scheduleNudge();
       }
     } catch(err){
       typing.remove();
       addBubble('error','エラー: ' + err.message + '\n（⚙︎でAPIキー・モデル名を確認してね）');
     }
     busy = false;
-    sendBtn.disabled = false; photoBtn.disabled = false;
+    sendBtn.disabled = false; photoBtn.disabled = false; diaryBtn.disabled = false;
   }
 
   /* ---------- greeting on open ---------- */
@@ -474,17 +707,46 @@
   }
 
   /* ---------- idle nudge ---------- */
+  let nudgeDueAt = 0;
+
+  function fireNudge(away){
+    if (busy) return;
+    if (nudgeCount >= MAX_NUDGES) return;
+    nudgeCount++;
+    nudgeDueAt = 0;
+    const p = away
+      ? '（システム指示：さっきのメッセージに返信がないままユーザーは一度アプリを離れて、今戻ってきた。責めずに、気にかけていたことが伝わる短いひとことを送って。）'
+      : '（システム指示：さっきのメッセージにユーザーからまだ返信がない。返事を催促しすぎず、気にかけるような短い追いメッセージをひとこと送って。）';
+    aiTurn(p);
+  }
+
   function scheduleNudge(){
     clearTimeout(nudgeTimer);
+    nudgeDueAt = 0;
     if (!flag(LS.nudge)) return;
     if (nudgeCount >= MAX_NUDGES) return;
+    nudgeDueAt = Date.now() + NUDGE_MINUTES*60*1000;
     nudgeTimer = setTimeout(() => {
-      if (document.visibilityState !== 'visible') return;
-      if (busy) return;
-      nudgeCount++;
-      aiTurn('（システム指示：さっきのメッセージにユーザーからまだ返信がない。返事を催促しすぎず、気にかけるような短い追いメッセージをひとこと送って。）');
+      if (document.visibilityState !== 'visible') return; // 離れてる間は visibilitychange 側で拾う
+      fireNudge(false);
     }, NUDGE_MINUTES*60*1000);
   }
+
+  // アプリに戻ってきた時、離れてる間に追いメッセージの時刻が来ていたら発動
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && nudgeDueAt && Date.now() >= nudgeDueAt){
+      fireNudge(true);
+    }
+  });
+
+  /* ---------- diary ---------- */
+  diaryBtn.addEventListener('click', () => {
+    if (busy) return;
+    const apiKey = get(LS.key,'');
+    if (!apiKey){ addBubble('error','APIキーが未設定だよ。⚙︎から入れてね'); openSheet(); return; }
+    const p = '（システム指示：今日は' + timeContext() + '。ここまでの会話や出来事をもとに、あなた（キャラクター）の視点で今日の日記を書いて。日付から始めて、その日にあったこと・話したこと・感じたことを、キャラクターらしい文体で200〜400字程度。日記の本文だけを出力して。）';
+    aiTurn(p, {diary:true});
+  });
 
   /* ---------- photo ---------- */
   photoBtn.addEventListener('click', async () => {
@@ -492,13 +754,12 @@
     const apiKey = get(LS.key,'');
     if (!apiKey){ addBubble('error','APIキーが未設定だよ。⚙︎から入れてね'); openSheet(); return; }
     busy = true;
-    sendBtn.disabled = true; photoBtn.disabled = true;
+    sendBtn.disabled = true; photoBtn.disabled = true; diaryBtn.disabled = true;
     const typing = showTyping();
     try {
       const imgModel = get(LS.imgModel,'') || 'gemini-2.5-flash-image';
-      const sys = get(LS.sys,'') || DEFAULT_SYS;
       const recent = history.filter(m=>!m.hidden).slice(-6).map(m => (m.role==='model'?'相手':'ユーザー') + ': ' + m.text).join('\n');
-      const prompt = '次のキャラクター設定と直近の会話の流れに合う、キャラクターが恋人に今スマホで撮って送りそうな写真を1枚生成して。スマホ写真らしい自然な構図で。\n【設定】' + sys + '\n【直近の会話】\n' + recent;
+      const prompt = '次のキャラクター設定と直近の会話の流れに合う、キャラクターが恋人に今スマホで撮って送りそうな写真を1枚生成して。スマホ写真らしい自然な構図で。\n【設定】' + fullSystemPrompt() + '\n【直近の会話】\n' + recent;
 
       const res = await fetch(
         'https://generativelanguage.googleapis.com/v1beta/models/' +
@@ -539,7 +800,7 @@
       addBubble('error','画像エラー: ' + err.message);
     }
     busy = false;
-    sendBtn.disabled = false; photoBtn.disabled = false;
+    sendBtn.disabled = false; photoBtn.disabled = false; diaryBtn.disabled = false;
   });
 
   /* ---------- settings ---------- */
@@ -549,15 +810,18 @@
     document.getElementById('imgModel').value = get(LS.imgModel,'gemini-2.5-flash-image');
     document.getElementById('charName').value = get(LS.name,'碧');
     document.getElementById('sysPrompt').value = get(LS.sys, DEFAULT_SYS);
+    document.getElementById('memory').value = get(LS.mem,'');
     document.getElementById('autoGreet').checked = flag(LS.greet);
     document.getElementById('autoNudge').checked = flag(LS.nudge);
     sheet.classList.add('show'); overlay.classList.add('show');
   }
-  function closeSheet(){
-    sheet.classList.remove('show'); overlay.classList.remove('show');
+  function closeSheets(){
+    sheet.classList.remove('show');
+    threadSheet.classList.remove('show');
+    overlay.classList.remove('show');
   }
   document.getElementById('openSettings').addEventListener('click', openSheet);
-  overlay.addEventListener('click', closeSheet);
+  overlay.addEventListener('click', closeSheets);
 
   document.getElementById('saveBtn').addEventListener('click', () => {
     localStorage.setItem(LS.key, document.getElementById('apiKey').value.trim());
@@ -565,19 +829,21 @@
     localStorage.setItem(LS.imgModel, document.getElementById('imgModel').value.trim() || 'gemini-2.5-flash-image');
     localStorage.setItem(LS.name, document.getElementById('charName').value.trim() || '碧');
     localStorage.setItem(LS.sys, document.getElementById('sysPrompt').value.trim() || DEFAULT_SYS);
+    localStorage.setItem(LS.mem, document.getElementById('memory').value.trim());
     localStorage.setItem(LS.greet, document.getElementById('autoGreet').checked ? '1':'0');
     localStorage.setItem(LS.nudge, document.getElementById('autoNudge').checked ? '1':'0');
-    document.getElementById('headerName').textContent = get(LS.name,'碧');
-    closeSheet();
+    updateHeader();
+    closeSheets();
     renderAll();
   });
 
   document.getElementById('clearBtn').addEventListener('click', () => {
-    if (confirm('会話履歴を全部消す？この操作は戻せないよ')){
+    const t = curThread();
+    if (confirm('「' + (t ? t.name : '') + '」の履歴を消す？（思い出ノートと設定は残るよ）')){
       history = [];
-      localStorage.removeItem(LS.hist);
+      localStorage.removeItem(histKey(curId));
       renderAll();
-      closeSheet();
+      closeSheets();
     }
   });
 
@@ -585,7 +851,8 @@
   inputEl.addEventListener('input', () => {
     inputEl.style.height = 'auto';
     inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
-    clearTimeout(nudgeTimer); // 入力中は追いメッセージ待機を止める
+    clearTimeout(nudgeTimer);
+    nudgeDueAt = 0;
   });
 
   sendBtn.addEventListener('click', send);
@@ -606,6 +873,7 @@
     }
     inputEl.value = ''; inputEl.style.height = 'auto';
     clearTimeout(nudgeTimer);
+    nudgeDueAt = 0;
     nudgeCount = 0;
     addBubble('user', text);
     history.push({role:'user', text, ts: Date.now()});
@@ -615,7 +883,8 @@
   }
 
   /* ---------- init ---------- */
-  document.getElementById('headerName').textContent = get(LS.name,'碧');
+  initThreads();
+  updateHeader();
   renderAll();
   if (!get(LS.key,'')) {
     setTimeout(openSheet, 600);
