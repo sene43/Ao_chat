@@ -295,7 +295,7 @@
   <button id="attachBtn" aria-label="写真を見せる" title="写真を見せる">🖼</button>
   <button id="photoBtn" aria-label="写真をリクエスト" title="写真を送ってもらう">📷</button>
   <button id="diaryBtn" aria-label="日記を書いてもらう" title="今日の日記を書いてもらう">📖</button>
-  <button id="memoryBtn" aria-label="今日のことを思い出に追加" title="今日のことを思い出に追加">🧠</button>
+  <button id="memoryBtn" aria-label="今日のことを思い出に追加" title="今日のことを思い出に追加">💭</button>
   <textarea id="input" rows="1" placeholder="メッセージを書く…"></textarea>
   <button id="send" aria-label="送信">↑</button>
 </div>
@@ -721,7 +721,7 @@
           history.push({role:'user', text: hiddenPrompt, hidden:true, ts: Date.now()});
         }
         if (opts.diary || opts.memory){
-          const label = opts.memory ? '🧠 思い出ノートに追加したよ' : '📖 今日の日記';
+          const label = opts.memory ? '💭 思い出ノートに追加したよ' : '📖 今日の日記';
           if (opts.memory){
             const mem = get(LS.mem,'').trim();
             localStorage.setItem(LS.mem, (mem ? mem + '\n' : '') + reply.trim());
