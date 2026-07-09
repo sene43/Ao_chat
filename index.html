@@ -228,15 +228,16 @@
   .sheet-title{font-size:16px;font-weight:700;color:var(--ao);margin-bottom:14px}
   .field{margin-bottom:16px}
   .field label{display:block;font-size:12px;color:var(--ink-dim);margin-bottom:6px}
-  .field input,.field textarea{
+  .field input,.field textarea,.field select{
     width:100%;
     background:var(--surface);
     border:1px solid rgba(63,167,160,.3);
     border-radius:12px;color:var(--ink);
     font-family:inherit;font-size:15px;
     padding:10px 12px;outline:none;
+    -webkit-appearance:none;appearance:none;
   }
-  .field input:focus,.field textarea:focus{border-color:var(--ao)}
+  .field input:focus,.field textarea:focus,.field select:focus{border-color:var(--ao)}
   .field textarea{min-height:140px;line-height:1.6;resize:vertical}
   .field .row{display:flex;align-items:center;gap:10px}
   .field .row input[type=checkbox]{width:auto}
@@ -321,9 +322,11 @@
   </div>
 
   <div class="field">
-    <label for="model">会話モデル名</label>
-    <input type="text" id="model" placeholder="gemini-2.5-flash">
-    <div class="hint">例: gemini-2.5-flash（速い・安い）/ gemini-2.5-pro（賢い）</div>
+    <label for="modelSel">会話モデル</label>
+    <select id="modelSel"></select>
+    <input type="text" id="model" placeholder="モデル名を手入力（例: gemini-2.5-flash）" style="margin-top:8px" hidden>
+    <button type="button" class="btn line" id="fetchModelsBtn" style="margin-top:8px;padding:9px;font-size:13px">🔄 使えるモデル一覧を取得</button>
+    <div class="hint">迷ったら gemini-2.5-flash。Gemma 4（gemma-4-31b-it）は無料枠が1日約1500回と多めでおしゃべり向き🆓 🔄を押すとAPIキーで使えるモデルを自動でリスト化するよ（キー保存後にどうぞ）。</div>
   </div>
 
   <div class="field">
@@ -387,6 +390,7 @@
   const LS = {
     key:   'gpc_apikey',
     model: 'gpc_model',
+    modelList:'gpc_modellist',
     imgModel:'gpc_imgmodel',
     name:  'gpc_charname',
     sys:   'gpc_sysprompt',
@@ -963,9 +967,77 @@
   });
 
   /* ---------- settings ---------- */
+  const DEFAULT_MODELS = ['gemini-2.5-flash','gemini-2.5-pro','gemma-4-31b-it','gemma-4-26b-a4b-it'];
+  const modelSel = document.getElementById('modelSel');
+  const modelInput = document.getElementById('model');
+
+  function modelList(){
+    try {
+      const l = JSON.parse(get(LS.modelList,'null'));
+      if (Array.isArray(l) && l.length) return l;
+    } catch(e){}
+    return DEFAULT_MODELS.slice();
+  }
+
+  function populateModelSelect(){
+    const cur = get(LS.model,'gemini-2.5-flash');
+    const list = modelList();
+    if (cur && list.indexOf(cur) === -1) list.unshift(cur);
+    modelSel.innerHTML = '';
+    list.forEach(m => {
+      const o = document.createElement('option');
+      o.value = m; o.textContent = m;
+      modelSel.appendChild(o);
+    });
+    const custom = document.createElement('option');
+    custom.value = '__custom';
+    custom.textContent = 'その他（手入力する）…';
+    modelSel.appendChild(custom);
+    modelSel.value = cur;
+    if (modelSel.value !== cur) modelSel.value = '__custom';
+    modelInput.hidden = (modelSel.value !== '__custom');
+    if (modelSel.value === '__custom') modelInput.value = cur;
+  }
+
+  modelSel.addEventListener('change', () => {
+    modelInput.hidden = (modelSel.value !== '__custom');
+    if (modelSel.value === '__custom') modelInput.focus();
+  });
+
+  function selectedModel(){
+    if (modelSel.value === '__custom') return modelInput.value.trim() || 'gemini-2.5-flash';
+    return modelSel.value || 'gemini-2.5-flash';
+  }
+
+  document.getElementById('fetchModelsBtn').addEventListener('click', async () => {
+    const apiKey = document.getElementById('apiKey').value.trim() || get(LS.key,'');
+    if (!apiKey){ alert('先にAPIキーを入れてね'); return; }
+    const btn = document.getElementById('fetchModelsBtn');
+    btn.disabled = true; btn.textContent = '取得中…';
+    try {
+      const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key=' + encodeURIComponent(apiKey));
+      const data = await res.json();
+      if (!res.ok) throw new Error((data.error && data.error.message) || ('HTTP ' + res.status));
+      const names = (data.models || [])
+        .filter(m => (m.supportedGenerationMethods || []).indexOf('generateContent') !== -1)
+        .map(m => m.name.replace(/^models\//, ''))
+        .filter(n => !/embedding|embed|aqa|tts|audio|live|veo|imagen|image/i.test(n));
+      if (!names.length) throw new Error('会話用モデルが見つからなかった…');
+      names.sort();
+      localStorage.setItem(LS.modelList, JSON.stringify(names));
+      populateModelSelect();
+      btn.textContent = '✓ ' + names.length + '個のモデルを取得したよ';
+    } catch(e){
+      btn.textContent = '🔄 使えるモデル一覧を取得';
+      alert('取得できなかった…（' + e.message + '）');
+    }
+    btn.disabled = false;
+    setTimeout(() => { btn.textContent = '🔄 使えるモデル一覧を取得'; }, 3000);
+  });
+
   function openSheet(){
     document.getElementById('apiKey').value = get(LS.key,'');
-    document.getElementById('model').value = get(LS.model,'gemini-2.5-flash');
+    populateModelSelect();
     document.getElementById('imgModel').value = get(LS.imgModel,'gemini-2.5-flash-image');
     document.getElementById('charName').value = get(LS.name,'碧');
     document.getElementById('sysPrompt').value = get(LS.sys, DEFAULT_SYS);
@@ -987,7 +1059,7 @@
 
   document.getElementById('saveBtn').addEventListener('click', () => {
     localStorage.setItem(LS.key, document.getElementById('apiKey').value.trim());
-    localStorage.setItem(LS.model, document.getElementById('model').value.trim() || 'gemini-2.5-flash');
+    localStorage.setItem(LS.model, selectedModel());
     localStorage.setItem(LS.imgModel, document.getElementById('imgModel').value.trim() || 'gemini-2.5-flash-image');
     localStorage.setItem(LS.name, document.getElementById('charName').value.trim() || '碧');
     localStorage.setItem(LS.sys, document.getElementById('sysPrompt').value.trim() || DEFAULT_SYS);
@@ -1101,6 +1173,59 @@
       img.src = reader.result;
     };
     reader.readAsDataURL(file);
+  });
+
+  /* ---------- tap to edit / regenerate ---------- */
+  function lastVisibleIndex(){
+    for (let i = history.length-1; i >= 0; i--){ if (!history[i].hidden) return i; }
+    return -1;
+  }
+
+  chatEl.addEventListener('click', e => {
+    if (busy) return;
+    const b = e.target.closest('.msg');
+    if (!b) return;
+    const isUser = b.classList.contains('user') && !b.classList.contains('photo');
+    const isAi = b.classList.contains('ai');
+    if (!isUser && !isAi) return;
+
+    const all = chatEl.querySelectorAll('.msg.user, .msg.ai');
+    if (!all.length) return;
+    const last = all[all.length-1];
+    const secondLast = all.length > 1 ? all[all.length-2] : null;
+    const li = lastVisibleIndex();
+    if (li < 0) return;
+
+    // 碧の最後の返事をタップ → 返事のやり直し
+    if (isAi && b === last && history[li] && history[li].role === 'model' && !history[li].diary){
+      if (!confirm('この返事をやり直してもらう？')) return;
+      history.splice(li, 1);
+      saveHistory();
+      renderAll();
+      aiTurn(null);
+      return;
+    }
+
+    // 自分の最後のメッセージをタップ → 打ち直し
+    if (isUser && (b === last || b === secondLast)){
+      let ui = -1;
+      for (let i = history.length-1; i >= 0; i--){
+        if (!history[i].hidden && history[i].role === 'user'){ ui = i; break; }
+      }
+      if (ui < 0) return;
+      const after = history.slice(ui+1).filter(m => !m.hidden);
+      if (after.length > 1) return; // 直後の返事1件までなら巻き戻せる
+      if (!confirm('このメッセージを打ち直す？（この発言と、それへの返事は消えるよ）')) return;
+      inputEl.value = history[ui].text
+        .replace(/\n（写真を1枚見せた）$/, '')
+        .replace(/^（写真を1枚見せた）$/, '');
+      history = history.slice(0, ui);
+      saveHistory();
+      renderAll();
+      inputEl.style.height = 'auto';
+      inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
+      inputEl.focus();
+    }
   });
 
   /* ---------- sending ---------- */
