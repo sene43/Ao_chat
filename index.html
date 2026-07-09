@@ -599,6 +599,9 @@
     if (mem) out += '\n\n【これまでのふたりの思い出・大切な記憶（会話の前提として自然に覚えていること）】\n' + mem;
     const t = curThread();
     if (t && t.name !== '日常') out += '\n\n【いまの話題】この会話スレッドのテーマは「' + t.name + '」。';
+    if (/gemma/i.test(get(LS.model,''))){
+      out += '\n\n【出力ルール（厳守）】返答は、キャラクターとしてのセリフと（ト書き）だけを日本語で出力すること。思考過程・計画・分析・箇条書きのメモ・英語のテキストは、どんな形でも絶対に出力しない。';
+    }
     return out;
   }
 
@@ -738,7 +741,23 @@
     }
     let reply = '';
     try { reply = data.candidates[0].content.parts.map(p => p.text || '').join(''); } catch(e){}
+    if (reply && /gemma/i.test(model)) reply = stripLeak(reply);
     return reply;
+  }
+
+  // Gemmaが英語の思考メモを漏らした場合、冒頭の英語ブロックを削って本文だけ残す
+  function stripLeak(text){
+    const lines = text.split('\n');
+    const asciiHeavy = s => {
+      const t = s.trim();
+      if (!t) return true;
+      const ascii = (t.match(/[\x00-\x7F]/g) || []).length;
+      return ascii / t.length > 0.7;
+    };
+    let i = 0;
+    while (i < lines.length && asciiHeavy(lines[i])) i++;
+    const out = lines.slice(i).join('\n').trim();
+    return out || text.trim();
   }
 
   function safetySettings(){
