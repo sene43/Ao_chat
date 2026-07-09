@@ -228,7 +228,7 @@
   .sheet-title{font-size:16px;font-weight:700;color:var(--ao);margin-bottom:14px}
   .field{margin-bottom:16px}
   .field label{display:block;font-size:12px;color:var(--ink-dim);margin-bottom:6px}
-  .field input,.field textarea,.field select{
+  .field input:not([type=checkbox]),.field textarea,.field select{
     width:100%;
     background:var(--surface);
     border:1px solid rgba(63,167,160,.3);
@@ -238,6 +238,24 @@
     -webkit-appearance:none;appearance:none;
   }
   .field input:focus,.field textarea:focus,.field select:focus{border-color:var(--ao)}
+  .field input[type=checkbox]{
+    -webkit-appearance:none;appearance:none;
+    width:24px;height:24px;flex:0 0 auto;margin:0;
+    background:var(--surface);
+    border:1.5px solid rgba(63,167,160,.5);
+    border-radius:8px;
+    position:relative;cursor:pointer;
+  }
+  .field input[type=checkbox]:checked{
+    background:linear-gradient(135deg,var(--ao) 0%,var(--ao-deep) 100%);
+    border-color:var(--ao);
+  }
+  .field input[type=checkbox]:checked::after{
+    content:'✓';
+    position:absolute;inset:0;
+    display:flex;align-items:center;justify-content:center;
+    color:#fff;font-size:15px;font-weight:700;
+  }
   .field textarea{min-height:140px;line-height:1.6;resize:vertical}
   .field .row{display:flex;align-items:center;gap:10px}
   .field .row input[type=checkbox]{width:auto}
