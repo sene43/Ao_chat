@@ -772,10 +772,14 @@
       if (!jpRe.test(t) && (heavy || engStart)){ i++; continue; }  // 日本語ゼロの英語行→捨てる
       if (engStart && jpRe.test(t)){
         // 英語メモと日本語本文が同じ行に融合→日本語が始まる位置から残す
+        // ただし「OKだよ」みたいな短い英語prefixの普通の返事は切らない
         const m = t.search(jpRe);
-        let start = m;
-        if (m > 0 && (t[m-1] === '（' || t[m-1] === '(')) start = m - 1;
-        lines[i] = t.slice(start);
+        const bullet = /^[\*\-•>]/.test(t);
+        if (bullet || m > 15){
+          let start = m;
+          if (m > 0 && (t[m-1] === '（' || t[m-1] === '(')) start = m - 1;
+          lines[i] = t.slice(start);
+        }
         break;
       }
       if (heavy){ i++; continue; }
