@@ -354,6 +354,15 @@
   </div>
 
   <div class="field">
+    <label for="worldSel">ふたりの世界観</label>
+    <select id="worldSel">
+      <option value="app">メッセージでやりとりしてる</option>
+      <option value="together">同じ家で一緒にいる（没入モード）</option>
+    </select>
+    <div class="hint">「一緒にいる」にすると、画面・スマホ・アプリの存在に触れず、同じ空間で直接会話してる前提になるよ🏠</div>
+  </div>
+
+  <div class="field">
     <label for="safetySel">セーフティフィルタ</label>
     <select id="safetySel">
       <option value="default">標準（Googleおまかせ）</option>
@@ -420,6 +429,7 @@
     model: 'gpc_model',
     modelList:'gpc_modellist',
     safety:'gpc_safety',
+    world: 'gpc_world',
     imgModel:'gpc_imgmodel',
     name:  'gpc_charname',
     sys:   'gpc_sysprompt',
@@ -599,6 +609,9 @@
     if (mem) out += '\n\n【これまでのふたりの思い出・大切な記憶（会話の前提として自然に覚えていること）】\n' + mem;
     const t = curThread();
     if (t && t.name !== '日常') out += '\n\n【いまの話題】この会話スレッドのテーマは「' + t.name + '」。';
+    if (get(LS.world,'app') === 'together'){
+      out += '\n\n【世界観（厳守）】あなたと相手は同じ家で一緒に暮らしていて、いま同じ空間でそばにいて直接会話している。スマホ・画面・アプリ・メッセージ・チャット・AIといった概念には一切言及しない。返事や（ト書き）は、同じ部屋で顔を見て話している前提で描写する。';
+    }
     if (/gemma/i.test(get(LS.model,''))){
       out += '\n\n【出力ルール（厳守）】返答は、キャラクターとしてのセリフと（ト書き）だけを日本語で出力すること。思考過程・計画・分析・箇条書きのメモ・英語のテキストは、どんな形でも絶対に出力しない。';
     }
@@ -748,14 +761,26 @@
   // Gemmaが英語の思考メモを漏らした場合、冒頭の英語ブロックを削って本文だけ残す
   function stripLeak(text){
     const lines = text.split('\n');
-    const asciiHeavy = s => {
-      const t = s.trim();
-      if (!t) return true;
-      const ascii = (t.match(/[\x00-\x7F]/g) || []).length;
-      return ascii / t.length > 0.7;
-    };
+    const jpRe = /[ぁ-んァ-ヶ一-龯]/;
     let i = 0;
-    while (i < lines.length && asciiHeavy(lines[i])) i++;
+    while (i < lines.length){
+      const t = lines[i].trim();
+      if (!t){ i++; continue; }                     // 冒頭の空行は読み飛ばす
+      const ascii = (t.match(/[\x00-\x7F]/g) || []).length;
+      const heavy = ascii / t.length > 0.7;
+      const engStart = /^[\*\-•>]*\s*[A-Za-z"'\[]/.test(t);
+      if (!jpRe.test(t) && (heavy || engStart)){ i++; continue; }  // 日本語ゼロの英語行→捨てる
+      if (engStart && jpRe.test(t)){
+        // 英語メモと日本語本文が同じ行に融合→日本語が始まる位置から残す
+        const m = t.search(jpRe);
+        let start = m;
+        if (m > 0 && (t[m-1] === '（' || t[m-1] === '(')) start = m - 1;
+        lines[i] = t.slice(start);
+        break;
+      }
+      if (heavy){ i++; continue; }
+      break;
+    }
     const out = lines.slice(i).join('\n').trim();
     return out || text.trim();
   }
@@ -905,12 +930,23 @@
     if (lastTs !== 0 && gap < GREET_GAP_HOURS*3600*1000) return;
 
     const extras = [annivContext(), await weatherContext()].filter(Boolean).join(' ');
+    const together = get(LS.world,'app') === 'together';
 
-    let p = '（システム指示：ユーザーが今アプリを開いた。現在は' + timeContext() + '。';
-    if (lastTs === 0){
-      p += 'これが最初の会話。挨拶して。';
+    let p;
+    if (together){
+      p = '（システム指示：相手がいま、あなたのいる部屋に顔を見せた。現在は' + timeContext() + '。';
+      if (lastTs === 0){
+        p += 'これが最初の会話。同じ空間にいる前提で声をかけて。';
+      } else {
+        p += '前に顔を合わせてから約' + gapText(gap) + '経った。時間帯と空いた時間に合った自然な第一声を短めにかけて。長く空いていたら少し寂しがってもいい。';
+      }
     } else {
-      p += '前回の会話から約' + gapText(gap) + '空いた。時間帯と空いた時間に合った自然な第一声を短めに送って。長く空いていたら少し寂しがってもいい。';
+      p = '（システム指示：ユーザーが今アプリを開いた。現在は' + timeContext() + '。';
+      if (lastTs === 0){
+        p += 'これが最初の会話。挨拶して。';
+      } else {
+        p += '前回の会話から約' + gapText(gap) + '空いた。時間帯と空いた時間に合った自然な第一声を短めに送って。長く空いていたら少し寂しがってもいい。';
+      }
     }
     if (extras) p += ' ' + extras;
     p += '）';
@@ -925,9 +961,17 @@
     if (nudgeCount >= MAX_NUDGES) return;
     nudgeCount++;
     nudgeDueAt = 0;
-    const p = away
-      ? '（システム指示：さっきのメッセージに返信がないままユーザーは一度アプリを離れて、今戻ってきた。責めずに、気にかけていたことが伝わる短いひとことを送って。）'
-      : '（システム指示：さっきのメッセージにユーザーからまだ返信がない。返事を催促しすぎず、気にかけるような短い追いメッセージをひとこと送って。）';
+    const together = get(LS.world,'app') === 'together';
+    let p;
+    if (together){
+      p = away
+        ? '（システム指示：相手はさっき少し席を外して、いま戻ってきた。責めずに、気にかけていたことが伝わる短いひとことをかけて。）'
+        : '（システム指示：さっきの言葉に相手からまだ返事がなく、静かにしている。急かさずに、そばにいる前提で気にかける短いひとことをかけて。）';
+    } else {
+      p = away
+        ? '（システム指示：さっきのメッセージに返信がないままユーザーは一度アプリを離れて、今戻ってきた。責めずに、気にかけていたことが伝わる短いひとことを送って。）'
+        : '（システム指示：さっきのメッセージにユーザーからまだ返信がない。返事を催促しすぎず、気にかけるような短い追いメッセージをひとこと送って。）';
+    }
     aiTurn(p);
   }
 
@@ -1101,6 +1145,7 @@
     populateModelSelect();
     document.getElementById('imgModel').value = get(LS.imgModel,'gemini-2.5-flash-image');
     document.getElementById('safetySel').value = get(LS.safety,'default');
+    document.getElementById('worldSel').value = get(LS.world,'app');
     document.getElementById('charName').value = get(LS.name,'碧');
     document.getElementById('sysPrompt').value = get(LS.sys, DEFAULT_SYS);
     document.getElementById('memory').value = get(LS.mem,'');
@@ -1124,6 +1169,7 @@
     localStorage.setItem(LS.model, selectedModel());
     localStorage.setItem(LS.imgModel, document.getElementById('imgModel').value.trim() || 'gemini-2.5-flash-image');
     localStorage.setItem(LS.safety, document.getElementById('safetySel').value);
+    localStorage.setItem(LS.world, document.getElementById('worldSel').value);
     localStorage.setItem(LS.name, document.getElementById('charName').value.trim() || '碧');
     localStorage.setItem(LS.sys, document.getElementById('sysPrompt').value.trim() || DEFAULT_SYS);
     localStorage.setItem(LS.mem, document.getElementById('memory').value.trim());
