@@ -602,6 +602,14 @@
   });
 
   /* ---------- system prompt ---------- */
+  function nowStr(){
+    const n = new Date();
+    const days = ['日','月','火','水','木','金','土'];
+    const mm = ('0' + n.getMinutes()).slice(-2);
+    return n.getFullYear() + '/' + (n.getMonth()+1) + '/' + n.getDate() +
+           '(' + days[n.getDay()] + ') ' + n.getHours() + ':' + mm;
+  }
+
   function fullSystemPrompt(){
     const sys = get(LS.sys,'') || DEFAULT_SYS;
     const mem = get(LS.mem,'').trim();
@@ -612,6 +620,7 @@
     if (get(LS.world,'app') === 'together'){
       out += '\n\n【世界観（厳守）】あなたと相手は同じ家で一緒に暮らしていて、いま同じ空間でそばにいて直接会話している。スマホ・画面・アプリ・メッセージ・チャット・AIといった概念には一切言及しない。返事や（ト書き）は、同じ部屋で顔を見て話している前提で描写する。';
     }
+    out += '\n\n【現在時刻】' + nowStr() + '。この時刻は常に把握しておくこと。ただし毎回口に出さず、時間に触れる自然な理由がある時だけ会話に活かす（例：出勤・退勤が近い、日付や年が変わった、記念日、遅い時間だから体を気づかう、など）。';
     if (/gemma/i.test(get(LS.model,''))){
       out += '\n\n【出力ルール（厳守）】返答は、キャラクターとしてのセリフと（ト書き）だけを日本語で出力すること。思考過程・計画・分析・箇条書きのメモ・英語のテキストは、どんな形でも絶対に出力しない。';
     }
