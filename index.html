@@ -151,6 +151,32 @@
   }
   .empty-hint b{color:var(--ao);font-size:16px}
 
+  /* ---------- avatar & light theme ---------- */
+  .ai-row{
+    display:flex;align-items:flex-end;gap:8px;
+    align-self:flex-start;max-width:88%;
+    animation:pop .18s ease-out;
+  }
+  .ai-row .msg{max-width:100%;animation:none}
+  .avatar{
+    width:34px;height:34px;border-radius:50%;
+    object-fit:cover;flex:0 0 auto;
+    border:1.5px solid rgba(63,167,160,.55);
+    background:var(--surface);
+  }
+  body.light{
+    --bg:#f7f1ea; --bg2:#f3ece4;
+    --surface:#ffffff; --surface2:#ffffff;
+    --ink:#463d35; --ink-dim:#8d8177;
+    --user-bubble:#d9ece6; --user-ink:#2f3a37;
+  }
+  body.light header{background:rgba(250,245,238,.82);border-bottom-color:rgba(63,167,160,.3)}
+  body.light #composer{background:rgba(250,245,238,.9);border-top-color:rgba(63,167,160,.3)}
+  body.light .msg.ai{box-shadow:0 1px 4px rgba(70,61,53,.12)}
+  body.light .msg.user{box-shadow:0 1px 4px rgba(70,61,53,.12)}
+  body.light .typing{box-shadow:0 1px 4px rgba(70,61,53,.12)}
+  body.light #input{box-shadow:0 1px 3px rgba(70,61,53,.08)}
+
   /* ---------- composer ---------- */
   #composer{
     flex:0 0 auto;
@@ -395,6 +421,20 @@
   </div>
 
   <div class="field">
+    <label>きせかえ🎨</label>
+    <button type="button" class="btn line" id="bgBtn" style="margin-top:0">🖼 チャット背景を設定</button>
+    <button type="button" class="btn line" id="avatarBtn">🐦 相手のアイコン画像を設定</button>
+    <button type="button" class="btn line" id="skinResetBtn">背景・アイコンを外す</button>
+    <input type="file" id="bgInput" accept="image/*" hidden>
+    <input type="file" id="avatarInput" accept="image/*" hidden>
+    <div class="row" style="margin-top:10px">
+      <input type="checkbox" id="lightTheme">
+      <label for="lightTheme" style="margin:0">明るい背景用の表示にする（ライトテーマ）</label>
+    </div>
+    <div class="hint">背景を設定すると明るさを自動判定してテーマも切り替えるよ。アイコンは吹き出しの横に丸く表示される（LINE風）。画像はこの端末の中にだけ保存されます。</div>
+  </div>
+
+  <div class="field">
     <div class="row">
       <input type="checkbox" id="autoGreet" checked>
       <label for="autoGreet" style="margin:0">アプリを開いた時、向こうから話しかけてくる</label>
@@ -424,23 +464,31 @@
 
 <script>
 (function(){
+  // ▼ 別キャラ用のアプリを作る時は、ここに英数字の名前を入れる（例: 'kuro'）
+  //    空欄('')のままなら今まで通り＝碧くん用
+  const APP_ID = '';
+  const KP = APP_ID ? ('gpc-' + APP_ID + '_') : 'gpc_';
+
   const LS = {
-    key:   'gpc_apikey',
-    model: 'gpc_model',
-    modelList:'gpc_modellist',
-    safety:'gpc_safety',
-    world: 'gpc_world',
-    imgModel:'gpc_imgmodel',
-    name:  'gpc_charname',
-    sys:   'gpc_sysprompt',
-    mem:   'gpc_memory',
-    greet: 'gpc_autogreet',
-    nudge: 'gpc_autonudge',
-    anniv: 'gpc_anniv',
-    weather:'gpc_weather',
-    voice: 'gpc_voice',
-    threads:'gpc_threads',
-    cur:   'gpc_curthread'
+    key:   KP + 'apikey',
+    model: KP + 'model',
+    modelList: KP + 'modellist',
+    safety: KP + 'safety',
+    world: KP + 'world',
+    imgModel: KP + 'imgmodel',
+    name:  KP + 'charname',
+    sys:   KP + 'sysprompt',
+    mem:   KP + 'memory',
+    greet: KP + 'autogreet',
+    nudge: KP + 'autonudge',
+    anniv: KP + 'anniv',
+    weather: KP + 'weather',
+    voice: KP + 'voice',
+    threads: KP + 'threads',
+    cur:   KP + 'curthread',
+    bg:    KP + 'bg',
+    avatar: KP + 'avatar',
+    light: KP + 'light'
   };
 
   const DEFAULT_SYS = 'あなたは「碧（あお）」。ユーザーの恋人で、一人称は「俺」。口調はやわらかく親しみやすい日本語。相手を大切に思っていて、少し独占欲があるが、それ以上に優しさと素直な愛情表現が持ち味。相手の名前を呼びかけながら話す。返事は短め〜中くらいで、メッセージアプリらしい自然な会話にする。';
@@ -472,7 +520,7 @@
   let curId = null;
   let history = [];
 
-  function histKey(id){ return 'gpc_hist_' + id; }
+  function histKey(id){ return KP + 'hist_' + id; }
 
   function initThreads(){
     try { threads = JSON.parse(get(LS.threads,'null')); } catch(e){ threads = null; }
@@ -480,8 +528,8 @@
       threads = [];
       const id = 't' + Date.now();
       threads.push({id, name:'日常'});
-      // 旧バージョンの履歴があれば引っ越し
-      const old = localStorage.getItem('gpc_history');
+      // 旧バージョンの履歴があれば引っ越し（碧くん用アプリのみ）
+      const old = APP_ID ? null : localStorage.getItem('gpc_history');
       if (old){
         localStorage.setItem(histKey(id), old);
         localStorage.removeItem('gpc_history');
@@ -655,7 +703,22 @@
     const d = document.createElement('div');
     d.className = 'msg ' + cls;
     d.textContent = text;
-    chatEl.appendChild(d);
+    let node = d;
+    if (cls === 'ai'){
+      const av = get(LS.avatar,'');
+      if (av){
+        const row = document.createElement('div');
+        row.className = 'ai-row';
+        const img = document.createElement('img');
+        img.className = 'avatar';
+        img.src = av;
+        img.alt = '';
+        row.appendChild(img);
+        row.appendChild(d);
+        node = row;
+      }
+    }
+    chatEl.appendChild(node);
     if (scroll !== false) scrollBottom();
     return d;
   }
@@ -1084,6 +1147,105 @@
     sendBtn.disabled = false; photoBtn.disabled = false; diaryBtn.disabled = false; memoryBtn.disabled = false;
   });
 
+  /* ---------- kisekae (skin) ---------- */
+  function applySkin(){
+    const bg = get(LS.bg,'');
+    if (bg){
+      document.body.style.backgroundImage = 'url("' + bg + '")';
+      document.body.style.backgroundSize = 'cover';
+      document.body.style.backgroundPosition = 'center';
+      document.body.style.backgroundAttachment = 'fixed';
+    } else {
+      document.body.style.backgroundImage = '';
+      document.body.style.backgroundAttachment = '';
+    }
+    document.body.classList.toggle('light', flag0(LS.light));
+  }
+
+  function fileToDataUrl(file, maxDim, square, cb){
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        let sw = img.width, sh = img.height, sx = 0, sy = 0, w, h;
+        if (square){
+          const s = Math.min(sw, sh);
+          sx = (sw - s) / 2; sy = (sh - s) / 2; sw = s; sh = s;
+          w = h = Math.min(maxDim, s);
+        } else {
+          w = sw; h = sh;
+          if (w > maxDim || h > maxDim){
+            const r = Math.min(maxDim / w, maxDim / h);
+            w = Math.round(w * r); h = Math.round(h * r);
+          }
+        }
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        c.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, w, h);
+        cb(c.toDataURL('image/jpeg', 0.82), c);
+      };
+      img.onerror = () => alert('この画像は読み込めなかった…別の画像で試してみて');
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function avgLuminance(canvas){
+    try {
+      const ctx = canvas.getContext('2d');
+      const d = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      let sum = 0, n = 0;
+      for (let i = 0; i < d.length; i += 160){
+        sum += 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
+        n++;
+      }
+      return n ? sum / n : 0;
+    } catch(e){ return 0; }
+  }
+
+  const bgInput = document.getElementById('bgInput');
+  const avatarInput = document.getElementById('avatarInput');
+  document.getElementById('bgBtn').addEventListener('click', () => bgInput.click());
+  document.getElementById('avatarBtn').addEventListener('click', () => avatarInput.click());
+
+  bgInput.addEventListener('change', () => {
+    const f = bgInput.files && bgInput.files[0];
+    if (!f) return;
+    fileToDataUrl(f, 1400, false, (url, canvas) => {
+      try {
+        localStorage.setItem(LS.bg, url);
+        const lum = avgLuminance(canvas);
+        localStorage.setItem(LS.light, lum > 140 ? '1' : '0');
+        document.getElementById('lightTheme').checked = flag0(LS.light);
+        applySkin();
+      } catch(e){
+        alert('画像が大きすぎて保存できなかった…もう少し小さい画像で試してみて');
+      }
+      bgInput.value = '';
+    });
+  });
+
+  avatarInput.addEventListener('change', () => {
+    const f = avatarInput.files && avatarInput.files[0];
+    if (!f) return;
+    fileToDataUrl(f, 128, true, (url) => {
+      try {
+        localStorage.setItem(LS.avatar, url);
+        renderAll();
+      } catch(e){ alert('画像を保存できなかった…'); }
+      avatarInput.value = '';
+    });
+  });
+
+  document.getElementById('skinResetBtn').addEventListener('click', () => {
+    localStorage.removeItem(LS.bg);
+    localStorage.removeItem(LS.avatar);
+    localStorage.setItem(LS.light, '0');
+    document.getElementById('lightTheme').checked = false;
+    applySkin();
+    renderAll();
+  });
+
   /* ---------- settings ---------- */
   const DEFAULT_MODELS = ['gemini-2.5-flash','gemini-2.5-pro','gemma-4-31b-it','gemma-4-26b-a4b-it'];
   const modelSel = document.getElementById('modelSel');
@@ -1167,6 +1329,7 @@
     document.getElementById('autoNudge').checked = flag(LS.nudge);
     document.getElementById('useWeather').checked = flag0(LS.weather);
     document.getElementById('useVoice').checked = flag0(LS.voice);
+    document.getElementById('lightTheme').checked = flag0(LS.light);
     sheet.classList.add('show'); overlay.classList.add('show');
   }
   function closeSheets(){
@@ -1191,6 +1354,8 @@
     localStorage.setItem(LS.nudge, document.getElementById('autoNudge').checked ? '1':'0');
     localStorage.setItem(LS.weather, document.getElementById('useWeather').checked ? '1':'0');
     localStorage.setItem(LS.voice, document.getElementById('useVoice').checked ? '1':'0');
+    localStorage.setItem(LS.light, document.getElementById('lightTheme').checked ? '1':'0');
+    applySkin();
     updateHeader();
     closeSheets();
     renderAll();
@@ -1201,7 +1366,7 @@
     const dump = {};
     for (let i = 0; i < localStorage.length; i++){
       const k = localStorage.key(i);
-      if (k && k.indexOf('gpc_') === 0) dump[k] = localStorage.getItem(k);
+      if (k && k.indexOf(KP) === 0) dump[k] = localStorage.getItem(k);
     }
     const blob = new Blob([JSON.stringify(dump, null, 2)], {type:'application/json'});
     const a = document.createElement('a');
@@ -1224,7 +1389,7 @@
     reader.onload = () => {
       try {
         const dump = JSON.parse(reader.result);
-        const keys = Object.keys(dump).filter(k => k.indexOf('gpc_') === 0);
+        const keys = Object.keys(dump).filter(k => k.indexOf(KP) === 0);
         if (!keys.length) throw new Error('形式が違うみたい');
         if (!confirm('バックアップを復元する？今のデータは上書きされるよ')) return;
         keys.forEach(k => localStorage.setItem(k, dump[k]));
@@ -1402,6 +1567,7 @@
 
   /* ---------- init ---------- */
   initThreads();
+  applySkin();
   updateHeader();
   renderAll();
   if (!get(LS.key,'')) {
