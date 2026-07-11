@@ -846,20 +846,31 @@
       }
     }
 
-    const res = await fetch(
-      'https://generativelanguage.googleapis.com/v1beta/models/' +
-      encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(apiKey),
-      {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify(body)
+    const url = 'https://generativelanguage.googleapis.com/v1beta/models/' +
+      encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(apiKey);
+
+    // 一時的なエラー（混雑・500系）は少し待って自動リトライ
+    let res, data, lastErr = '';
+    for (let attempt = 0; attempt < 3; attempt++){
+      if (attempt > 0) await new Promise(r => setTimeout(r, 1200 * attempt));
+      try {
+        res = await fetch(url, {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify(body)
+        });
+      } catch(netErr){
+        lastErr = netErr.message; continue; // 通信エラーもリトライ
       }
-    );
-    const data = await res.json();
-    if (!res.ok){
+      data = await res.json();
+      if (res.ok) break;
       const msg = (data && data.error && data.error.message) ? data.error.message : ('HTTP ' + res.status);
-      throw new Error(msg);
+      lastErr = msg;
+      const transient = res.status === 500 || res.status === 503 || res.status === 429 ||
+        /internal error|overloaded|unavailable|try again/i.test(msg);
+      if (!transient) throw new Error(msg); // APIキー間違いなど恒久エラーは即中断
     }
+    if (!res || !res.ok) throw new Error(lastErr || 'Internal error');
     let reply = '';
     try { reply = data.candidates[0].content.parts.map(p => p.text || '').join(''); } catch(e){}
     if (reply){
@@ -946,7 +957,12 @@
       }
     } catch(err){
       typing.remove();
-      addBubble('error','エラー: ' + err.message + '\n（⚙︎でAPIキー・モデル名を確認してね）');
+      const transient = /internal error|overloaded|unavailable|try again|503|500|429/i.test(err.message);
+      if (transient){
+        addBubble('error','いま回線が混んでるみたい…💦 少し待って、碧くんの返事をタップで「やり直し」してみてね（Gemmaは混雑時に出やすいよ）');
+      } else {
+        addBubble('error','エラー: ' + err.message + '\n（⚙︎でAPIキー・モデル名を確認してね）');
+      }
     }
     busy = false;
     sendBtn.disabled = false; photoBtn.disabled = false; diaryBtn.disabled = false; memoryBtn.disabled = false;
