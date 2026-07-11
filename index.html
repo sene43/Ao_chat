@@ -134,6 +134,23 @@
   }
   .msg a{color:var(--ao);word-break:break-all;text-decoration:underline}
   .msg.user a{color:#2b6d68}
+  .bubble-time{
+    display:block;font-size:9.5px;color:var(--ink-dim);
+    text-align:right;margin-top:4px;line-height:1;opacity:.85;
+  }
+  .date-chip{
+    align-self:center;font-size:11px;color:var(--ink-dim);
+    background:rgba(63,167,160,.14);border:1px solid rgba(63,167,160,.2);
+    border-radius:12px;padding:3px 12px;margin:2px 0;
+  }
+  .hit-row{
+    padding:12px;border:1px solid rgba(63,167,160,.25);border-radius:14px;
+    margin-bottom:10px;background:var(--surface);cursor:pointer;
+  }
+  .hit-meta{font-size:11px;color:var(--ao);margin-bottom:4px}
+  .hit-text{font-size:13px;color:var(--ink);line-height:1.6;word-break:break-word}
+  @keyframes flashHit{0%{box-shadow:0 0 0 3px rgba(63,167,160,.9)}100%{box-shadow:0 0 0 3px rgba(63,167,160,0)}}
+  .msg.flash{animation:flashHit 1.4s ease-out 2}
   .typing{
     align-self:flex-start;display:flex;gap:5px;
     padding:14px 18px;border-radius:var(--radius);
@@ -325,6 +342,7 @@
     <div class="partner-sub" id="headerSub">そばにいるよ</div>
   </div>
   <div class="header-spacer"></div>
+  <button class="icon-btn" id="openSearch" aria-label="メッセージ検索">🔎</button>
   <button class="icon-btn" id="openThreads" aria-label="話題を切り替える">💬</button>
   <button class="icon-btn" id="openSettings" aria-label="設定">⚙︎</button>
 </header>
@@ -348,6 +366,15 @@
 </div>
 
 <div id="overlay"></div>
+
+<div id="searchSheet" class="sheet" role="dialog" aria-label="メッセージ検索">
+  <div class="sheet-handle"></div>
+  <div class="sheet-title">メッセージ検索🔎</div>
+  <div class="field">
+    <input type="text" id="searchInput" placeholder="ことばで探す（すべての話題から）">
+  </div>
+  <div id="searchResults"></div>
+</div>
 
 <div id="threadSheet" class="sheet" role="dialog" aria-label="話題の切り替え">
   <div class="sheet-handle"></div>
@@ -463,6 +490,7 @@
   <button class="btn primary" id="saveBtn">保存する</button>
   <button class="btn line" id="backupBtn">💾 バックアップを保存（設定＋思い出＋会話）</button>
   <button class="btn line" id="restoreBtn">📂 バックアップから復元</button>
+  <button class="btn line" id="exportBtn">📜 この話題を読み物として保存</button>
   <input type="file" id="restoreInput" accept="application/json,.json" hidden>
   <div class="hint">バックアップにはAPIキーも含まれるから、ファイルは人に送らず大切に保管してね🔐</div>
   <button class="btn ghost" id="clearBtn">この話題の履歴を消す</button>
@@ -678,14 +706,41 @@
     out += '\n\n【現在時刻】' + nowStr() + '。この時刻は常に把握しておくこと。ただし毎回口に出さず、時間に触れる自然な理由がある時だけ会話に活かす（例：出勤・退勤が近い、日付や年が変わった、記念日、遅い時間だから体を気づかう、など）。';
     out += '\n\n【リンクのルール】動画やサイトを勧める時、URLを記憶から創作してはいけない（存在しないリンクになる）。YouTubeの動画を勧める時は、必ず https://www.youtube.com/results?search_query=検索キーワード の形式の検索リンクで案内する（キーワードはURLエンコード不要、スペースは+にする）。個別動画の直リンクは、相手が貼ってくれたURLを参照する場合だけ使ってよい。';
     if (/gemma/i.test(get(LS.model,''))){
-      out += '\n\n【出力ルール（厳守）】返答は、キャラクターとしてのセリフと（ト書き）だけを日本語で出力すること。思考過程・計画・分析・箇条書きのメモ・英語のテキストは、どんな形でも絶対に出力しない。';
+      out += '\n\n【出力ルール（厳守）】返答は、キャラクターとしてのセリフと（ト書き）だけを日本語で出力すること。思考過程・計画・分析・箇条書きのメモ・英語のテキストは、どんな形でも絶対に出力しない。「Action:」「Dialogue:」のようなラベルや見出し、行頭の記号（*・-）も一切使わず、地の文とセリフだけを自然に書くこと。';
     }
     return out;
   }
 
   /* ---------- render ---------- */
+  let lastDateKey = null;
+
+  function fmtTime(ts){
+    const d = new Date(ts);
+    return d.getHours() + ':' + ('0' + d.getMinutes()).slice(-2);
+  }
+  function fmtDate(ts){
+    const d = new Date(ts);
+    const days = ['日','月','火','水','木','金','土'];
+    return d.getFullYear() + '年' + (d.getMonth()+1) + '月' + d.getDate() + '日(' + days[d.getDay()] + ')';
+  }
+  function dateKey(ts){
+    const d = new Date(ts);
+    return d.getFullYear() + '-' + d.getMonth() + '-' + d.getDate();
+  }
+  function maybeDateChip(ts){
+    if (!ts) return;
+    const key = dateKey(ts);
+    if (key === lastDateKey) return;
+    lastDateKey = key;
+    const chip = document.createElement('div');
+    chip.className = 'date-chip';
+    chip.textContent = fmtDate(ts);
+    chatEl.appendChild(chip);
+  }
+
   function renderAll(){
     chatEl.innerHTML = '';
+    lastDateKey = null;
     const visible = history.filter(m => !m.hidden);
     if (visible.length === 0){
       const hint = document.createElement('div');
@@ -694,9 +749,12 @@
       chatEl.appendChild(hint);
       return;
     }
-    visible.forEach(m => {
-      if (m.diary) addDiaryBubble(m.text, false, m.label);
-      else addBubble(m.role === 'model' ? 'ai' : 'user', m.text, false);
+    history.forEach((m, idx) => {
+      if (m.hidden) return;
+      let el;
+      if (m.diary) el = addDiaryBubble(m.text, false, m.label, m.ts);
+      else el = addBubble(m.role === 'model' ? 'ai' : 'user', m.text, false, m.ts);
+      if (el) el.dataset.hidx = idx;
     });
     scrollBottom();
   }
@@ -711,13 +769,20 @@
       '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
   }
 
-  function addBubble(cls, text, scroll){
+  function addBubble(cls, text, scroll, ts){
     const hint = chatEl.querySelector('.empty-hint');
     if (hint) hint.remove();
+    if (cls !== 'error') maybeDateChip(ts);
     const d = document.createElement('div');
     d.className = 'msg ' + cls;
     if (/https?:\/\//.test(text)) d.innerHTML = linkify(text);
     else d.textContent = text;
+    if (ts && cls !== 'error'){
+      const tm = document.createElement('span');
+      tm.className = 'bubble-time';
+      tm.textContent = fmtTime(ts);
+      d.appendChild(tm);
+    }
     let node = d;
     if (cls === 'ai'){
       const av = get(LS.avatar,'');
@@ -738,9 +803,10 @@
     return d;
   }
 
-  function addDiaryBubble(text, scroll, labelText){
+  function addDiaryBubble(text, scroll, labelText, ts){
     const hint = chatEl.querySelector('.empty-hint');
     if (hint) hint.remove();
+    maybeDateChip(ts);
     const d = document.createElement('div');
     d.className = 'msg diary';
     const label = document.createElement('div');
@@ -763,6 +829,7 @@
     d.appendChild(label); d.appendChild(body); d.appendChild(btn);
     chatEl.appendChild(d);
     if (scroll !== false) scrollBottom();
+    return d;
   }
 
   function addPhotoBubble(dataUrl, mine){
@@ -880,7 +947,18 @@
           ({'＝':'=','？':'?','＆':'&','／':'/','：':':','．':'.','＋':'+'}[c])));
     }
     if (reply && /gemma/i.test(model)) reply = stripLeak(reply);
+    if (reply && /gemma/i.test(model)) reply = stripLabels(reply);
     return reply;
+  }
+
+  // Gemmaが *Action:* *Dialogue:* のようなラベルを付けた場合に除去する
+  function stripLabels(text){
+    if (!/\*|action|dialogue|behavior|narration/i.test(text)) return text;
+    let t = text
+      .replace(/^[\s]*[\*\-•>]*\s*\*{0,2}\s*(action|dialogue|behavior|speech|narration|thought|scene)\s*\*{0,2}\s*[:：]\s*/gim, '')
+      .replace(/\*{1,2}\s*(action|dialogue|behavior|speech|narration|thought|scene)\s*\*{1,2}\s*[:：]?/gi, '');
+    t = t.split('\n').map(line => line.replace(/^[\s]*[\*\-•>]+\s*/, '')).join('\n');
+    return t.replace(/[ \t]{2,}/g,' ').replace(/\n{3,}/g,'\n\n').trim();
   }
 
   // Gemmaが英語の思考メモを漏らした場合、冒頭の英語ブロックを削って本文だけ残す
@@ -945,10 +1023,10 @@
             const mem = get(LS.mem,'').trim();
             localStorage.setItem(LS.mem, (mem ? mem + '\n' : '') + reply.trim());
           }
-          addDiaryBubble(reply, true, label);
+          addDiaryBubble(reply, true, label, Date.now());
           history.push({role:'model', text: reply, diary:true, label: label, ts: Date.now()});
         } else {
-          addBubble('ai', reply);
+          addBubble('ai', reply, true, Date.now());
           if (flag0(LS.voice)) speak(reply);
           history.push({role:'model', text: reply, ts: Date.now()});
           scheduleNudge();
@@ -1304,6 +1382,127 @@
     renderAll();
   });
 
+  /* ---------- export thread as readable text ---------- */
+  document.getElementById('exportBtn').addEventListener('click', () => {
+    const t = curThread();
+    const name = get(LS.name,'碧');
+    const lines = [];
+    lines.push('「' + (t ? t.name : '') + '」の会話記録 — ' + name + ' と私');
+    lines.push('書き出し: ' + nowStr());
+    let dk = null;
+    history.forEach(m => {
+      if (m.hidden) return;
+      if (m.ts && dateKey(m.ts) !== dk){
+        dk = dateKey(m.ts);
+        lines.push('');
+        lines.push('――― ' + fmtDate(m.ts) + ' ―――');
+        lines.push('');
+      }
+      const who = m.role === 'model' ? name : '私';
+      const tm = m.ts ? '[' + fmtTime(m.ts) + '] ' : '';
+      if (m.diary) lines.push(tm + '📖 ' + name + 'の日記:\n' + m.text + '\n');
+      else lines.push(tm + who + ':\n' + m.text + '\n');
+    });
+    const blob = new Blob([lines.join('\n')], {type:'text/plain'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    const d = new Date();
+    a.download = '会話_' + (t ? t.name : '') + '_' + d.getFullYear() +
+      ('0' + (d.getMonth()+1)).slice(-2) + ('0' + d.getDate()).slice(-2) + '.txt';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  });
+
+  /* ---------- message search ---------- */
+  const searchSheet = document.getElementById('searchSheet');
+  const searchInput = document.getElementById('searchInput');
+  let searchTimer = null;
+
+  document.getElementById('openSearch').addEventListener('click', () => {
+    sheet.classList.remove('show');
+    threadSheet.classList.remove('show');
+    searchSheet.classList.add('show');
+    overlay.classList.add('show');
+    setTimeout(() => searchInput.focus(), 250);
+    runSearch();
+  });
+
+  searchInput.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(runSearch, 250);
+  });
+
+  function snippet(text, q){
+    const low = text.toLowerCase();
+    const pos = low.indexOf(q);
+    let start = Math.max(0, pos - 20);
+    let s = text.slice(start, start + 70);
+    if (start > 0) s = '…' + s;
+    if (start + 70 < text.length) s += '…';
+    return s;
+  }
+
+  function runSearch(){
+    const q = searchInput.value.trim().toLowerCase();
+    const box = document.getElementById('searchResults');
+    box.innerHTML = '';
+    if (!q) return;
+    const hits = [];
+    threads.forEach(t => {
+      let h = [];
+      try { h = JSON.parse(localStorage.getItem(histKey(t.id)) || '[]'); } catch(e){}
+      h.forEach((m, idx) => {
+        if (m.hidden) return;
+        if ((m.text || '').toLowerCase().indexOf(q) !== -1){
+          hits.push({t: t, idx: idx, m: m});
+        }
+      });
+    });
+    hits.sort((a, b) => (b.m.ts || 0) - (a.m.ts || 0));
+    if (!hits.length){
+      box.innerHTML = '<div class="hint">見つからなかった…別のことばで試してみて</div>';
+      return;
+    }
+    hits.slice(0, 50).forEach(hit => {
+      const row = document.createElement('div');
+      row.className = 'hit-row';
+      const meta = document.createElement('div');
+      meta.className = 'hit-meta';
+      const who = hit.m.role === 'model' ? get(LS.name,'碧') : '私';
+      meta.textContent = '💬 ' + hit.t.name + ' ・ ' + who +
+        (hit.m.ts ? ' ・ ' + fmtDate(hit.m.ts) + ' ' + fmtTime(hit.m.ts) : '');
+      const body = document.createElement('div');
+      body.className = 'hit-text';
+      body.textContent = snippet(hit.m.text, q);
+      row.appendChild(meta); row.appendChild(body);
+      row.addEventListener('click', () => jumpToHit(hit));
+      box.appendChild(row);
+    });
+  }
+
+  function jumpToHit(hit){
+    if (hit.t.id !== curId){
+      curId = hit.t.id;
+      saveThreads();
+      loadHistory();
+      updateHeader();
+      clearTimeout(nudgeTimer);
+      nudgeCount = 0;
+    }
+    renderAll();
+    closeSheets();
+    setTimeout(() => {
+      const el = chatEl.querySelector('[data-hidx="' + hit.idx + '"]');
+      if (el){
+        el.scrollIntoView({block:'center'});
+        el.classList.add('flash');
+        setTimeout(() => el.classList.remove('flash'), 3200);
+      }
+    }, 120);
+  }
+
   /* ---------- settings ---------- */
   const DEFAULT_MODELS = ['gemini-2.5-flash','gemini-2.5-pro','gemma-4-31b-it','gemma-4-26b-a4b-it'];
   const modelSel = document.getElementById('modelSel');
@@ -1394,6 +1593,7 @@
   function closeSheets(){
     sheet.classList.remove('show');
     threadSheet.classList.remove('show');
+    searchSheet.classList.remove('show');
     overlay.classList.remove('show');
   }
   document.getElementById('openSettings').addEventListener('click', openSheet);
@@ -1618,7 +1818,7 @@
     const ytUrl = ytMatch ? ytMatch[0] : null;
 
     if (image) addPhotoBubble(image.dataUrl, true);
-    if (text) addBubble('user', text);
+    if (text) addBubble('user', text, true, Date.now());
 
     const histText = image
       ? ((text ? text + '\n' : '') + '（写真を1枚見せた）')
