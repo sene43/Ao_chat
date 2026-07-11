@@ -832,9 +832,18 @@
       contents: msgs
     };
     const ss = safetySettings();
-    if (ss) body.safetySettings = ss;
+    if (ss && !/gemma/i.test(model)) body.safetySettings = ss;
     if (flag0(LS.search) && /gemini/i.test(model)){
       body.tools = [{ google_search: {} }];
+    }
+    // Gemmaは指示書の時刻を読み飛ばしがちなので、直近メッセージの隣にも時刻を添える
+    if (/gemma/i.test(model)){
+      for (let i = msgs.length - 1; i >= 0; i--){
+        if (msgs[i].role === 'user'){
+          msgs[i].parts.push({ text: '\n（いまは' + nowStr() + '）' });
+          break;
+        }
+      }
     }
 
     const res = await fetch(
