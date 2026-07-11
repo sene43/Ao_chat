@@ -151,6 +151,20 @@
   .hit-text{font-size:13px;color:var(--ink);line-height:1.6;word-break:break-word}
   @keyframes flashHit{0%{box-shadow:0 0 0 3px rgba(63,167,160,.9)}100%{box-shadow:0 0 0 3px rgba(63,167,160,0)}}
   .msg.flash{animation:flashHit 1.4s ease-out 2}
+  #toBottom{
+    position:fixed;
+    right:14px;
+    bottom:calc(env(safe-area-inset-bottom) + 82px);
+    width:42px;height:42px;border-radius:50%;
+    border:1px solid rgba(63,167,160,.5);
+    background:rgba(26,43,56,.92);
+    color:var(--ao);font-size:19px;
+    display:none;align-items:center;justify-content:center;
+    box-shadow:0 3px 10px rgba(0,0,0,.3);
+    cursor:pointer;z-index:6;
+  }
+  #toBottom.show{display:flex}
+  body.light #toBottom{background:rgba(255,255,255,.94);box-shadow:0 3px 10px rgba(70,61,53,.2)}
   .typing{
     align-self:flex-start;display:flex;gap:5px;
     padding:14px 18px;border-radius:var(--radius);
@@ -348,6 +362,7 @@
 </header>
 
 <main id="chat" aria-live="polite"></main>
+<button id="toBottom" aria-label="最新のメッセージへ">⬇</button>
 
 <div id="attachPreview" hidden>
   <img id="attachThumb" alt="送信予定の写真">
@@ -799,8 +814,17 @@
       }
     }
     chatEl.appendChild(node);
-    if (scroll !== false) scrollBottom();
+    if (scroll === 'top') scrollToMsg(node);
+    else if (scroll !== false) scrollBottom();
     return d;
+  }
+
+  // 長い返事は先頭から読めるように、そのメッセージの頭までスクロール
+  function scrollToMsg(node){
+    requestAnimationFrame(() => {
+      chatEl.scrollTop = Math.max(0, node.offsetTop - 10);
+      updateToBottom();
+    });
   }
 
   function addDiaryBubble(text, scroll, labelText, ts){
@@ -828,7 +852,8 @@
     });
     d.appendChild(label); d.appendChild(body); d.appendChild(btn);
     chatEl.appendChild(d);
-    if (scroll !== false) scrollBottom();
+    if (scroll === 'top') scrollToMsg(d);
+    else if (scroll !== false) scrollBottom();
     return d;
   }
 
@@ -846,8 +871,22 @@
   }
 
   function scrollBottom(){
-    requestAnimationFrame(() => { chatEl.scrollTop = chatEl.scrollHeight; });
+    requestAnimationFrame(() => {
+      chatEl.scrollTop = chatEl.scrollHeight;
+      updateToBottom();
+    });
   }
+
+  const toBottomBtn = document.getElementById('toBottom');
+  function updateToBottom(){
+    const away = chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight;
+    toBottomBtn.classList.toggle('show', away > 250);
+  }
+  chatEl.addEventListener('scroll', updateToBottom, {passive:true});
+  toBottomBtn.addEventListener('click', () => {
+    chatEl.scrollTo({top: chatEl.scrollHeight, behavior:'smooth'});
+    setTimeout(updateToBottom, 400);
+  });
 
   function saveHistory(){
     if (history.length > 200) history = history.slice(-200);
@@ -1023,10 +1062,10 @@
             const mem = get(LS.mem,'').trim();
             localStorage.setItem(LS.mem, (mem ? mem + '\n' : '') + reply.trim());
           }
-          addDiaryBubble(reply, true, label, Date.now());
+          addDiaryBubble(reply, 'top', label, Date.now());
           history.push({role:'model', text: reply, diary:true, label: label, ts: Date.now()});
         } else {
-          addBubble('ai', reply, true, Date.now());
+          addBubble('ai', reply, 'top', Date.now());
           if (flag0(LS.voice)) speak(reply);
           history.push({role:'model', text: reply, ts: Date.now()});
           scheduleNudge();
