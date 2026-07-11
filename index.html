@@ -451,6 +451,10 @@
       <input type="checkbox" id="useVoice">
       <label for="useVoice" style="margin:0">返事を声で読み上げる（スマホの合成音声）</label>
     </div>
+    <div class="row" style="margin-top:8px">
+      <input type="checkbox" id="useSearch">
+      <label for="useSearch" style="margin:0">🔍 Google検索して答えられる（Gemini系モデルのみ）</label>
+    </div>
     <div class="hint">天気ONにすると初回に位置情報の許可を聞かれるよ。位置は天気の取得だけに使われて、どこにも保存されない。</div>
   </div>
 
@@ -484,6 +488,7 @@
     anniv: KP + 'anniv',
     weather: KP + 'weather',
     voice: KP + 'voice',
+    search: KP + 'search',
     threads: KP + 'threads',
     cur:   KP + 'curthread',
     bg:    KP + 'bg',
@@ -782,7 +787,7 @@
   }
 
   /* ---------- Gemini call ---------- */
-  async function callGemini(extraHiddenPrompt, image){
+  async function callGemini(extraHiddenPrompt, image, ytUrl){
     const apiKey = get(LS.key,'');
     const model = get(LS.model,'') || 'gemini-2.5-flash';
 
@@ -802,6 +807,15 @@
         }
       }
     }
+    // YouTubeのURLがあれば動画として添付（Gemini系のみ対応）
+    if (ytUrl && /gemini/i.test(model)){
+      for (let i = msgs.length - 1; i >= 0; i--){
+        if (msgs[i].role === 'user'){
+          msgs[i].parts.unshift({ file_data: { file_uri: ytUrl } });
+          break;
+        }
+      }
+    }
 
     const body = {
       system_instruction: { parts: [{ text: fullSystemPrompt() }] },
@@ -809,6 +823,9 @@
     };
     const ss = safetySettings();
     if (ss) body.safetySettings = ss;
+    if (flag0(LS.search) && /gemini/i.test(model)){
+      body.tools = [{ google_search: {} }];
+    }
 
     const res = await fetch(
       'https://generativelanguage.googleapis.com/v1beta/models/' +
@@ -878,7 +895,7 @@
     sendBtn.disabled = true; photoBtn.disabled = true; diaryBtn.disabled = true; memoryBtn.disabled = true;
     const typing = showTyping();
     try {
-      const reply = await callGemini(hiddenPrompt, opts.image);
+      const reply = await callGemini(hiddenPrompt, opts.image, opts.youtube);
       typing.remove();
       if (!reply){
         addBubble('error','返事が空だったよ。フィルタかモデル名を確認してみて');
@@ -1329,6 +1346,7 @@
     document.getElementById('autoNudge').checked = flag(LS.nudge);
     document.getElementById('useWeather').checked = flag0(LS.weather);
     document.getElementById('useVoice').checked = flag0(LS.voice);
+    document.getElementById('useSearch').checked = flag0(LS.search);
     document.getElementById('lightTheme').checked = flag0(LS.light);
     sheet.classList.add('show'); overlay.classList.add('show');
   }
@@ -1354,6 +1372,7 @@
     localStorage.setItem(LS.nudge, document.getElementById('autoNudge').checked ? '1':'0');
     localStorage.setItem(LS.weather, document.getElementById('useWeather').checked ? '1':'0');
     localStorage.setItem(LS.voice, document.getElementById('useVoice').checked ? '1':'0');
+    localStorage.setItem(LS.search, document.getElementById('useSearch').checked ? '1':'0');
     localStorage.setItem(LS.light, document.getElementById('lightTheme').checked ? '1':'0');
     applySkin();
     updateHeader();
@@ -1553,6 +1572,10 @@
     imgInput.value = '';
     attachPreview.hidden = true;
 
+    // YouTubeリンク検出（碧くんが動画を見れるように）
+    const ytMatch = text.match(/https?:\/\/(?:www\.)?(?:youtube\.com\/(?:watch\?v=|shorts\/)[\w-]+|youtu\.be\/[\w-]+)\S*/);
+    const ytUrl = ytMatch ? ytMatch[0] : null;
+
     if (image) addPhotoBubble(image.dataUrl, true);
     if (text) addBubble('user', text);
 
@@ -1561,7 +1584,10 @@
       : text;
     history.push({role:'user', text: histText, ts: Date.now()});
     saveHistory();
-    await aiTurn(null, image ? {image} : {});
+    const opts = {};
+    if (image) opts.image = image;
+    if (ytUrl) opts.youtube = ytUrl;
+    await aiTurn(null, opts);
     inputEl.focus();
   }
 
