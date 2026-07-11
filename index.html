@@ -132,6 +132,8 @@
     font-family:inherit;font-size:13px;font-weight:700;
     padding:8px 16px;border-radius:10px;cursor:pointer;
   }
+  .msg a{color:var(--ao);word-break:break-all;text-decoration:underline}
+  .msg.user a{color:#2b6d68}
   .typing{
     align-self:flex-start;display:flex;gap:5px;
     padding:14px 18px;border-radius:var(--radius);
@@ -702,12 +704,19 @@
     return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
 
+  // URLをタップできるリンクに変換（エスケープ後に適用するので安全）
+  function linkify(s){
+    return esc(s).replace(/(https?:\/\/[^\s<）)」』\]]+)/g,
+      '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+  }
+
   function addBubble(cls, text, scroll){
     const hint = chatEl.querySelector('.empty-hint');
     if (hint) hint.remove();
     const d = document.createElement('div');
     d.className = 'msg ' + cls;
-    d.textContent = text;
+    if (/https?:\/\//.test(text)) d.innerHTML = linkify(text);
+    else d.textContent = text;
     let node = d;
     if (cls === 'ai'){
       const av = get(LS.avatar,'');
