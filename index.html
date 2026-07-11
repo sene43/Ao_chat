@@ -186,7 +186,7 @@
 
   /* ---------- avatar & light theme ---------- */
   .ai-row{
-    display:flex;align-items:flex-end;gap:8px;
+    display:flex;align-items:flex-start;gap:8px;
     align-self:flex-start;max-width:88%;
     animation:pop .18s ease-out;
   }
@@ -196,6 +196,9 @@
     object-fit:cover;flex:0 0 auto;
     border:1.5px solid rgba(63,167,160,.55);
     background:var(--surface);
+    position:sticky;
+    top:8px;              /* 長文を読んでいる間、アイコンがついてくる */
+    align-self:flex-start;
   }
   body.light{
     --bg:#f7f1ea; --bg2:#f3ece4;
@@ -821,10 +824,9 @@
 
   // 長い返事は先頭から読めるように、そのメッセージの頭までスクロール
   function scrollToMsg(node){
-    requestAnimationFrame(() => {
-      chatEl.scrollTop = Math.max(0, node.offsetTop - 10);
-      updateToBottom();
-    });
+    const go = () => { chatEl.scrollTop = Math.max(0, node.offsetTop - 10); updateToBottom(); };
+    requestAnimationFrame(go);
+    setTimeout(go, 120); // レイアウト確定後にもう一度合わせて精度を上げる
   }
 
   function addDiaryBubble(text, scroll, labelText, ts){
