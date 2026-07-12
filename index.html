@@ -610,7 +610,7 @@
   function updateHeader(){
     document.getElementById('headerName').textContent = get(LS.name,'碧');
     const t = curThread();
-    document.getElementById('headerSub').textContent = t ? ('💬 ' + t.name) : 'そばにいるよ';
+    document.getElementById('headerSub').textContent = t ? ((t.rp ? '🎭 ' : '💬 ') + t.name) : 'そばにいるよ';
   }
 
   function lastTsOf(id){
@@ -639,11 +639,23 @@
       row.className = 'thread-row' + (t.id === curId ? ' active' : '');
       const name = document.createElement('div');
       name.className = 'thread-name';
-      name.textContent = t.name;
+      name.textContent = (t.rp ? '🎭 ' : '') + t.name;
       const time = document.createElement('div');
       time.className = 'thread-time';
       time.textContent = relTime(lastTsOf(t.id));
-      row.appendChild(name); row.appendChild(time);
+      const mode = document.createElement('button');
+      mode.className = 'thread-del';
+      mode.textContent = t.rp ? '🎭' : '🕰';
+      mode.title = t.rp ? '物語モード（時間を気にしない）' : '通常モード（時間を知ってる）';
+      mode.setAttribute('aria-label', t.name + ' のモード切替');
+      mode.addEventListener('click', (e) => {
+        e.stopPropagation();
+        t.rp = !t.rp;
+        saveThreads();
+        renderThreadList();
+        if (t.id === curId) updateHeader();
+      });
+      row.appendChild(name); row.appendChild(time); row.appendChild(mode);
       if (threads.length > 1){
         const del = document.createElement('button');
         del.className = 'thread-del';
@@ -690,8 +702,9 @@
   document.getElementById('newThreadBtn').addEventListener('click', () => {
     const name = prompt('新しい話題の名前は？（例：旅行の相談、深夜トーク）');
     if (!name || !name.trim()) return;
+    const rp = confirm('「' + name.trim() + '」を物語モード🎭にする？\n（OK＝時間を気にせず、いつでも続きから再開できるロールプレイ用。キャンセル＝時間を知ってる通常モード）');
     const id = 't' + Date.now();
-    threads.push({id, name: name.trim()});
+    threads.push({id, name: name.trim(), rp: rp});
     curId = id;
     saveThreads();
     loadHistory();
@@ -721,7 +734,12 @@
     if (get(LS.world,'app') === 'together'){
       out += '\n\n【世界観（厳守）】あなたと相手は同じ家で一緒に暮らしていて、いま同じ空間でそばにいて直接会話している。スマホ・画面・アプリ・メッセージ・チャット・AIといった概念には一切言及しない。返事や（ト書き）は、同じ部屋で顔を見て話している前提で描写する。';
     }
-    out += '\n\n【現在時刻】' + nowStr() + '。この時刻は常に把握しておくこと。ただし毎回口に出さず、時間に触れる自然な理由がある時だけ会話に活かす（例：出勤・退勤が近い、日付や年が変わった、記念日、遅い時間だから体を気づかう、など）。';
+    const rpMode = !!(curThread() && curThread().rp);
+    if (rpMode){
+      out += '\n\n【物語モード（厳守）】この会話は連続したロールプレイ・物語である。現実の時刻・日付・経過時間には一切言及せず、物語の中の時間軸だけを生きること。会話が空いても「久しぶり」「あの時は楽しかった」など過去の振り返りやダイジェストにせず、必ず前回のシーンの続きから、その場にいる続きとして自然に再開する。';
+    } else {
+      out += '\n\n【現在時刻】' + nowStr() + '。この時刻は常に把握しておくこと。ただし毎回口に出さず、時間に触れる自然な理由がある時だけ会話に活かす（例：出勤・退勤が近い、日付や年が変わった、記念日、遅い時間だから体を気づかう、など）。';
+    }
     out += '\n\n【リンクのルール】動画やサイトを勧める時、URLを記憶から創作してはいけない（存在しないリンクになる）。YouTubeの動画を勧める時は、必ず https://www.youtube.com/results?search_query=検索キーワード の形式の検索リンクで案内する（キーワードはURLエンコード不要、スペースは+にする）。個別動画の直リンクは、相手が貼ってくれたURLを参照する場合だけ使ってよい。';
     if (/gemma/i.test(get(LS.model,''))){
       out += '\n\n【出力ルール（厳守）】返答は、キャラクターとしてのセリフと（ト書き）だけを日本語で出力すること。思考過程・計画・分析・箇条書きのメモ・英語のテキストは、どんな形でも絶対に出力しない。「Action:」「Dialogue:」のようなラベルや見出し、行頭の記号（*・-）も一切使わず、地の文とセリフだけを自然に書くこと。';
@@ -944,8 +962,8 @@
     if (flag0(LS.search) && /gemini/i.test(model)){
       body.tools = [{ google_search: {} }];
     }
-    // Gemmaは指示書の時刻を読み飛ばしがちなので、直近メッセージの隣にも時刻を添える
-    if (/gemma/i.test(model)){
+    // Gemmaは指示書の時刻を読み飛ばしがちなので、直近メッセージの隣にも時刻を添える（物語モードでは添えない）
+    if (/gemma/i.test(model) && !(curThread() && curThread().rp)){
       for (let i = msgs.length - 1; i >= 0; i--){
         if (msgs[i].role === 'user'){
           msgs[i].parts.push({ text: '\n（いまは' + nowStr() + '）' });
@@ -1178,6 +1196,7 @@
   async function maybeGreet(){
     if (!flag(LS.greet)) return;
     if (!get(LS.key,'')) return;
+    if (curThread() && curThread().rp) return; // 物語モードでは時間ベースの第一声はしない
     const lastTs = history.length ? (history[history.length-1].ts || 0) : 0;
     const gap = Date.now() - lastTs;
     if (lastTs !== 0 && gap < GREET_GAP_HOURS*3600*1000) return;
@@ -1232,6 +1251,7 @@
     clearTimeout(nudgeTimer);
     nudgeDueAt = 0;
     if (!flag(LS.nudge)) return;
+    if (curThread() && curThread().rp) return; // 物語モードでは追いメッセージもしない
     if (nudgeCount >= MAX_NUDGES) return;
     nudgeDueAt = Date.now() + NUDGE_MINUTES*60*1000;
     nudgeTimer = setTimeout(() => {
@@ -1673,7 +1693,7 @@
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     const d = new Date();
-    a.download = 'ao_backup_' + d.getFullYear() +
+    a.download = get(LS.name,'碧') + '_backup_' + d.getFullYear() +
       ('0' + (d.getMonth()+1)).slice(-2) + ('0' + d.getDate()).slice(-2) + '.json';
     document.body.appendChild(a);
     a.click();
