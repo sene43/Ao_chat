@@ -1817,12 +1817,6 @@
         const lum = avgLuminance(canvas);
         localStorage.setItem(LS.light, lum > 140 ? '1' : '0');
         document.getElementById('lightTheme').checked = flag0(LS.light);
-    document.getElementById('uName').value = get(LS.uname,'');
-    document.getElementById('uIntro').value = get(LS.uintro,'');
-    fontSlider.value = get(LS.fsize,'15');
-    document.getElementById('fontVal').textContent = get(LS.fsize,'15');
-    document.getElementById('apiTestResult').textContent = '';
-    showTab('conn');
         applySkin();
       } catch(e){
         alert('画像が大きすぎて保存できなかった…もう少し小さい画像で試してみて');
@@ -2060,6 +2054,12 @@
     document.getElementById('useVoice').checked = flag0(LS.voice);
     document.getElementById('useSearch').checked = flag0(LS.search);
     document.getElementById('lightTheme').checked = flag0(LS.light);
+    document.getElementById('uName').value = get(LS.uname,'');
+    document.getElementById('uIntro').value = get(LS.uintro,'');
+    fontSlider.value = get(LS.fsize,'15');
+    document.getElementById('fontVal').textContent = get(LS.fsize,'15');
+    document.getElementById('apiTestResult').textContent = '';
+    showTab('conn');
     updateStorageMeter();
     sheet.classList.add('show'); overlay.classList.add('show');
   }
