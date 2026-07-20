@@ -541,6 +541,9 @@
     <input type="text" id="imgModel" placeholder="gemini-2.5-flash-image">
     <button type="button" class="btn line" id="findImgBtn" style="margin-top:8px;padding:9px;font-size:13px">🔍 使える画像モデルを探す</button>
     <div class="hint" id="imgFindResult" style="margin-top:6px"></div>
+    <label for="imgLook" style="margin-top:12px;display:block">📷用の見た目メモ（画像生成のとき最優先）</label>
+    <textarea id="imgLook" style="min-height:80px" placeholder="例：碧＝黒髪で犬っぽい雰囲気の日本人の青年。私＝眼鏡でオリーブ色の外ハネヘアの女性。絵柄はアニメイラスト風。"></textarea>
+    <div class="hint">誰が写るか・髪型・絵柄（アニメ風／イラスト風／写真風）を簡潔に。これが無いと知らない人が出がち🤣</div>
     <div class="hint">📷ボタンで使うモデル。gemini-2.5-flash-image（Geminiキー・要支払い設定）か gpt-image-1（OpenAIキー）が使えるよ。生成画像はページを閉じると消えます。</div>
   </div>
 
@@ -711,7 +714,8 @@
     fsize: KP + 'fsize',
     tok:   KP + 'tokstats',
     mrecent: KP + 'mrecent',
-    depth: KP + 'depth'
+    depth: KP + 'depth',
+    imgLook: KP + 'imglook'
   };
 
   const DEFAULT_SYS = 'あなたは「碧（あお）」。ユーザーの恋人で、一人称は「俺」。口調はやわらかく親しみやすい日本語。相手を大切に思っていて、少し独占欲があるが、それ以上に優しさと素直な愛情表現が持ち味。相手の名前を呼びかけながら話す。返事は短め〜中くらいで、メッセージアプリらしい自然な会話にする。';
@@ -1704,8 +1708,23 @@
   });
 
   /* ---------- photo ---------- */
+  function buildImgPrompt(ask){
+    const look = get(LS.imgLook,'').trim();
+    const cname = get(LS.name,'碧');
+    const recent = history.filter(m => !m.hidden).slice(-6)
+      .map(m => (m.role === 'model' ? cname : '私') + ': ' + m.text).join('\n');
+    let p2 = '恋人にスマホで送る写真を1枚生成してください。スマホ写真らしい自然な構図。\n';
+    if (look) p2 += '【登場人物の見た目・絵のスタイル（最優先で厳守）】\n' + look + '\n';
+    if (ask) p2 += '【リクエスト（優先）】' + ask + '\n';
+    p2 += '【直近の会話（場面の参考に）】\n' + recent;
+    return p2;
+  }
+
   photoBtn.addEventListener('click', async () => {
     if (busy) return;
+    const askInput = window.prompt('どんな写真がいい？（空欄＝会話の流れにおまかせ）', '');
+    if (askInput === null) return; // キャンセル
+    const ask = askInput.trim();
     const imConf = get(LS.imgModel,'') || 'gemini-2.5-flash-image';
     const imKeyMissing = /^(gpt-image|dall-e)/i.test(imConf) ? !get(LS.oaKey,'') : !get(LS.key,'');
     if (imKeyMissing){ addBubble('error','画像モデル用のAPIキーが未設定だよ。⚙︎から入れてね'); openSheet(); return; }
@@ -1718,8 +1737,7 @@
         // OpenAI画像生成
         const oaKey = get(LS.oaKey,'');
         if (!oaKey) throw new Error('OpenAIのAPIキーが未設定だよ（⚙︎で入れてね）');
-        const recentOA = history.filter(m=>!m.hidden).slice(-6).map(m => (m.role==='model'?'相手':'ユーザー') + ': ' + m.text).join('\n');
-        const promptOA = '次のキャラクター設定と直近の会話の流れに合う、キャラクターが恋人に今スマホで撮って送りそうな写真を1枚生成して。スマホ写真らしい自然な構図で。\n【設定】' + fullSystemPrompt() + '\n【直近の会話】\n' + recentOA;
+        const promptOA = buildImgPrompt(ask);
         const resOA = await fetch('https://api.openai.com/v1/images/generations', {
           method:'POST',
           headers:{'Content-Type':'application/json','Authorization':'Bearer ' + oaKey},
@@ -1744,8 +1762,7 @@
         sendBtn.disabled = false; photoBtn.disabled = false; diaryBtn.disabled = false; memoryBtn.disabled = false; letterBtn.disabled = false; topicBtn.disabled = false;
         return;
       }
-      const recent = history.filter(m=>!m.hidden).slice(-6).map(m => (m.role==='model'?'相手':'ユーザー') + ': ' + m.text).join('\n');
-      const prompt = '次のキャラクター設定と直近の会話の流れに合う、キャラクターが恋人に今スマホで撮って送りそうな写真を1枚生成して。スマホ写真らしい自然な構図で。\n【設定】' + fullSystemPrompt() + '\n【直近の会話】\n' + recent;
+      const prompt = buildImgPrompt(ask);
 
       const imgKey = get(LS.key,'');
       const res = await fetch(
@@ -2133,6 +2150,7 @@
     document.getElementById('orKey').value = get(LS.orKey,'');
     populateModelSelect();
     document.getElementById('imgModel').value = get(LS.imgModel,'gemini-2.5-flash-image');
+    document.getElementById('imgLook').value = get(LS.imgLook,'');
     document.getElementById('safetySel').value = get(LS.safety,'default');
     document.getElementById('worldSel').value = get(LS.world,'app');
     const dt = curThread();
@@ -2175,6 +2193,7 @@
     localStorage.setItem(LS.orKey, document.getElementById('orKey').value.trim());
     localStorage.setItem(LS.model, selectedModel());
     localStorage.setItem(LS.imgModel, document.getElementById('imgModel').value.trim() || 'gemini-2.5-flash-image');
+    localStorage.setItem(LS.imgLook, document.getElementById('imgLook').value.trim());
     localStorage.setItem(LS.safety, document.getElementById('safetySel').value);
     localStorage.setItem(LS.world, document.getElementById('worldSel').value);
     const dts = curThread();
