@@ -1424,7 +1424,55 @@
     }
     let out = lines.slice(start, end + 1).join('\n').trim();
     if (!out) return text.trim();
+    out = stripQuotedDraft(out);
+    out = stripLeadEng(out);
     return dedupeReply(out);
+  }
+
+  // 引用符付きの下書きブロック（2行以上）を除去。閉じ引用符の直後に本文が接着していても剥がす
+  function stripQuotedDraft(t){
+    const lines = t.split('\n');
+    let qCount = 0;
+    for (const l of lines){
+      const s = l.trim();
+      if (!s) continue;
+      if (/^["\u201c]/.test(s)) qCount++;
+      else break;
+    }
+    if (qCount < 2) return t; // 引用1行だけなら本物のセリフかもしれないので触らない
+    let i = 0;
+    while (i < lines.length){
+      const s = lines[i].trim();
+      if (!s){ i++; continue; }
+      if (/^["\u201c]/.test(s)){
+        const lastQ = Math.max(s.lastIndexOf('"'), s.lastIndexOf('\u201d'));
+        const after = lastQ >= 0 ? s.slice(lastQ + 1).trim() : '';
+        if (after){ lines[i] = after; break; }
+        i++;
+      } else break;
+    }
+    const out = lines.slice(i).join('\n').trim();
+    return out || t;
+  }
+
+  // 先頭行に融合した英語メモ（Keep it casual... 等）を切除
+  function stripLeadEng(t){
+    const lines = t.split('\n');
+    let i = 0;
+    while (i < lines.length && !lines[i].trim()) i++;
+    if (i >= lines.length) return t;
+    const s = lines[i].trim();
+    const jpRe = /[ぁ-んァ-ヶ一-龯]/;
+    if (/^[A-Za-z"'*\[]/.test(s) && jpRe.test(s)){
+      const m = s.search(jpRe);
+      if (m > 12){
+        let st = m;
+        if (m > 0 && (s[m-1] === '（' || s[m-1] === '(')) st = m - 1;
+        lines[i] = s.slice(st);
+        return lines.join('\n');
+      }
+    }
+    return t;
   }
 
   // 下書きと完成版で同じ本文が2回出てきたら、後半（完成版）だけ残す
