@@ -1424,9 +1424,40 @@
     }
     let out = lines.slice(start, end + 1).join('\n').trim();
     if (!out) return text.trim();
+    out = stripAnnotations(out);
+    out = stripEchoQuotes(out);
     out = stripQuotedDraft(out);
     out = stripLeadEng(out);
     return dedupeReply(out);
+  }
+
+  // (Sentiment) (Physical affection/...) など英語の分類ラベルを除去
+  function stripAnnotations(t){
+    return t.replace(/\((?=[A-Za-z])[A-Za-z0-9 ,\/&\-]{2,}\)/g, '');
+  }
+
+  // 先頭の「引用符付き下書き」を、同じ内容が後で再登場する場合だけ剥がす
+  // （下書きの引用は本文で繰り返される。本物のセリフ引用は繰り返されないので無傷）
+  function stripEchoQuotes(t){
+    const norm = s => s.replace(/[\s"\u201c\u201d『』「」]/g, '');
+    let guard = 0;
+    while (guard++ < 8){
+      const lines = t.split('\n');
+      let i = 0;
+      while (i < lines.length && !lines[i].trim()) i++;
+      if (i >= lines.length) break;
+      const s = lines[i].trim();
+      if (!/^["\u201c]/.test(s)) break;
+      const lastQ = Math.max(s.lastIndexOf('"'), s.lastIndexOf('\u201d'));
+      if (lastQ <= 0) break;
+      const inner = s.slice(1, lastQ);
+      const after = s.slice(lastQ + 1).trim();
+      const rest = (after ? after + '\n' : '') + lines.slice(i + 1).join('\n');
+      if (inner.trim() && norm(rest).indexOf(norm(inner)) !== -1){
+        t = rest.trim();
+      } else break;
+    }
+    return t;
   }
 
   // 引用符付きの下書きブロック（2行以上）を除去。閉じ引用符の直後に本文が接着していても剥がす
