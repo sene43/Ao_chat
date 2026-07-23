@@ -1156,15 +1156,45 @@
     } catch(e){}
   }
 
-  function addTokens(inTok, outTok){
+  // ---- 料金の概算（100万トークンあたりのUSD単価。2026年7月時点の目安） ----
+  const JPY_RATE = 150; // 1ドル＝何円で換算するか（ここを書き換えれば調整できるよ）
+  const MODEL_PRICES = [
+    [/gemma/i,                   0,    0   ],  // Gemmaは無料枠
+    [/gemini-2\.5-flash-lite/i,  0.10, 0.40],
+    [/gemini-2\.5-flash/i,       0.30, 2.50],
+    [/gemini-3\.5-flash/i,       1.50, 9.00],
+    [/gemini-2\.5-pro/i,         1.25, 10.0],
+    [/haiku/i,                   1.00, 5.00],
+    [/sonnet-5/i,                2.00, 10.0],
+    [/sonnet/i,                  3.00, 15.0],
+    [/opus/i,                    5.00, 25.0],
+    [/gpt-4\.1-nano/i,           0.10, 0.40],
+    [/gpt-4\.1-mini/i,           0.40, 1.60],
+    [/gpt-4\.1/i,                2.00, 8.00],
+    [/gpt-5\.6.*luna|luna/i,     1.00, 6.00],
+    [/gpt-5\.6.*terra|terra/i,   2.50, 15.0]
+  ];
+  function estCostUSD(model, inTok, outTok){
+    for (let i = 0; i < MODEL_PRICES.length; i++){
+      if (MODEL_PRICES[i][0].test(model)){
+        return (inTok * MODEL_PRICES[i][1] + outTok * MODEL_PRICES[i][2]) / 1000000;
+      }
+    }
+    return null; // 単価表にないモデルは料金不明（トークン数だけ数える）
+  }
+
+  function addTokens(inTok, outTok, model){
     try {
       const d = new Date();
       const today = d.getFullYear() + '-' + (d.getMonth()+1) + '-' + d.getDate();
       let s = {};
       try { s = JSON.parse(get(LS.tok,'{}')); } catch(e){}
-      if (s.d !== today) s = { d: today, i: 0, o: 0 };
+      if (s.d !== today) s = { d: today, i: 0, o: 0, c: 0 };
+      if (!s.c) s.c = 0;
       s.i += (inTok || 0);
       s.o += (outTok || 0);
+      const cost = estCostUSD(model || get(LS.model,''), inTok || 0, outTok || 0);
+      if (cost) s.c += cost;
       localStorage.setItem(LS.tok, JSON.stringify(s));
     } catch(e){}
   }
@@ -1339,11 +1369,11 @@
       // 使用トークンを記録（各社の返事に正確な数が入っている）
       try {
         if (provider === 'gemini' && data.usageMetadata){
-          addTokens(data.usageMetadata.promptTokenCount, data.usageMetadata.candidatesTokenCount);
+          addTokens(data.usageMetadata.promptTokenCount, data.usageMetadata.candidatesTokenCount, model);
         } else if ((provider === 'openai' || provider === 'openrouter') && data.usage){
-          addTokens(data.usage.prompt_tokens, data.usage.completion_tokens);
+          addTokens(data.usage.prompt_tokens, data.usage.completion_tokens, model);
         } else if (provider === 'anthropic' && data.usage){
-          addTokens(data.usage.input_tokens, data.usage.output_tokens);
+          addTokens(data.usage.input_tokens, data.usage.output_tokens, model);
         }
       } catch(e){}
     } catch(err){
@@ -1375,7 +1405,7 @@
         );
         data = r2.data; reply = r2.reply;
         try {
-          if (data && data.usage) addTokens(data.usage.prompt_tokens, data.usage.completion_tokens);
+          if (data && data.usage) addTokens(data.usage.prompt_tokens, data.usage.completion_tokens, model);
         } catch(e){}
       } else {
         throw err;
@@ -1425,6 +1455,7 @@
     let out = lines.slice(start, end + 1).join('\n').trim();
     if (!out) return text.trim();
     out = stripAnnotations(out);
+    out = dedupeReply(out);
     out = stripEchoQuotes(out);
     out = stripQuotedDraft(out);
     out = stripLeadEng(out);
@@ -1439,7 +1470,7 @@
   // 先頭の「引用符付き下書き」を、同じ内容が後で再登場する場合だけ剥がす
   // （下書きの引用は本文で繰り返される。本物のセリフ引用は繰り返されないので無傷）
   function stripEchoQuotes(t){
-    const norm = s => s.replace(/[\s"\u201c\u201d『』「」]/g, '');
+    const norm = s => s.replace(/[\s"\u201c\u201d\uff02『』「」]/g, '');
     let guard = 0;
     while (guard++ < 8){
       const lines = t.split('\n');
@@ -1447,8 +1478,11 @@
       while (i < lines.length && !lines[i].trim()) i++;
       if (i >= lines.length) break;
       const s = lines[i].trim();
-      if (!/^["\u201c]/.test(s)) break;
-      const lastQ = Math.max(s.lastIndexOf('"'), s.lastIndexOf('\u201d'));
+      if (!/^["\u201c\uff02\u300c\u300e]/.test(s)) break;
+      let lastQ = -1;
+      for (let k = s.length - 1; k > 0; k--){
+        if ('"\u201d\uff02\u300d\u300f'.indexOf(s[k]) !== -1){ lastQ = k; break; }
+      }
       if (lastQ <= 0) break;
       const inner = s.slice(1, lastQ);
       const after = s.slice(lastQ + 1).trim();
@@ -1467,7 +1501,7 @@
     for (const l of lines){
       const s = l.trim();
       if (!s) continue;
-      if (/^["\u201c]/.test(s)) qCount++;
+      if (/^["\u201c\uff02]/.test(s)) qCount++;
       else break;
     }
     if (qCount < 2) return t; // 引用1行だけなら本物のセリフかもしれないので触らない
@@ -1475,8 +1509,8 @@
     while (i < lines.length){
       const s = lines[i].trim();
       if (!s){ i++; continue; }
-      if (/^["\u201c]/.test(s)){
-        const lastQ = Math.max(s.lastIndexOf('"'), s.lastIndexOf('\u201d'));
+      if (/^["\u201c\uff02]/.test(s)){
+        const lastQ = Math.max(s.lastIndexOf('"'), s.lastIndexOf('\u201d'), s.lastIndexOf('\uff02'));
         const after = lastQ >= 0 ? s.slice(lastQ + 1).trim() : '';
         if (after){ lines[i] = after; break; }
         i++;
@@ -1507,13 +1541,20 @@
   }
 
   // 下書きと完成版で同じ本文が2回出てきたら、後半（完成版）だけ残す
+  // 目印は「最初の一文から引用記号を剥がした中身」（全角＂などにも対応）
+  const QCHARS = '"\u201c\u201d\uff02\u300c\u300d\u300e\u300f';
   function dedupeReply(t){
     const lines = t.split('\n');
     const firstLine = (lines.find(l => l.trim()) || '').trim();
-    if (firstLine.length < 10) return t;
-    const lastIdx = t.lastIndexOf(firstLine);
-    const firstIdx = t.indexOf(firstLine);
-    if (lastIdx > firstIdx && lastIdx > t.length * 0.25){
+    let a = 0, b = firstLine.length;
+    while (a < b && QCHARS.indexOf(firstLine[a]) !== -1) a++;
+    while (b > a && QCHARS.indexOf(firstLine[b-1]) !== -1) b--;
+    const probe = firstLine.slice(a, b).trim();
+    if (probe.length < 8) return t;
+    const firstIdx = t.indexOf(probe);
+    if (firstIdx === -1) return t;
+    const lastIdx = t.lastIndexOf(probe);
+    if (lastIdx > firstIdx && lastIdx > t.length * 0.2){
       const tail = t.slice(lastIdx).trim();
       if (tail.length >= t.length * 0.35) return tail;
     }
@@ -2399,8 +2440,8 @@
     reader.onload = () => {
       const img = new Image();
       img.onload = () => {
-        // 大きい写真は縮小してから送る（通信量と読み取り速度のため）
-        const MAX = 1024;
+        // 大きい写真は縮小してから送る（節約優先：長辺768pxでAIの読み取りコスト最小クラスに）
+        const MAX = 768;
         let w = img.width, h = img.height;
         if (w > MAX || h > MAX){
           const r = Math.min(MAX / w, MAX / h);
@@ -2409,7 +2450,7 @@
         const canvas = document.createElement('canvas');
         canvas.width = w; canvas.height = h;
         canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
         pendingImage = {
           mime: 'image/jpeg',
           data: dataUrl.split(',')[1],
@@ -2644,7 +2685,9 @@
     const today = d.getFullYear() + '-' + (d.getMonth()+1) + '-' + d.getDate();
     const line = document.getElementById('tokLine');
     if (s.d === today && (s.i || s.o)){
-      line.textContent = '🪙 今日の会話量：送信 ' + (s.i||0).toLocaleString() + ' ／ 受信 ' + (s.o||0).toLocaleString() + ' トークン（無料枠モデルなら気にしなくてOK）';
+      const yen = (s.c || 0) * JPY_RATE;
+      const yenStr = yen >= 10 ? ('約' + Math.round(yen) + '円') : ('約' + (Math.round(yen * 10) / 10) + '円');
+      line.textContent = '🪙 今日の会話量：送信 ' + (s.i||0).toLocaleString() + ' ／ 受信 ' + (s.o||0).toLocaleString() + ' トークン ≈ ' + yenStr + '（概算・無料枠は0円扱い）';
     } else {
       line.textContent = '🪙 今日はまだ会話していないよ';
     }
