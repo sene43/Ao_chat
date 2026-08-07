@@ -627,6 +627,12 @@
   </div>
 
   <div class="field" data-pane="you">
+    <label for="uNow">🌡 いまの私メモ（一時的な近況）</label>
+    <textarea id="uNow" style="min-height:70px" placeholder="例：ちょっと体調ゆらぎ中。今週は耳鼻科の結果待ちでソワソワしてる。"></textarea>
+    <div class="hint">この部屋・あの部屋関係なく「今の状況」として相手に伝わるよ。思い出ノートに残すほどじゃない近況用。状況が変わったら自分で書き換え・削除してね（自動では消えないよ）。</div>
+  </div>
+
+  <div class="field" data-pane="you">
     <label>私のアイコン（自分の吹き出し用）</label>
     <button type="button" class="btn line" id="uAvatarBtn" style="margin-top:0">🙋 自分のアイコン画像を設定</button>
     <button type="button" class="btn line" id="uAvatarClear">アイコンを外す</button>
@@ -726,7 +732,8 @@
     tok:   KP + 'tokstats',
     mrecent: KP + 'mrecent',
     depth: KP + 'depth',
-    imgLook: KP + 'imglook'
+    imgLook: KP + 'imglook',
+    unow: KP + 'unow'
   };
 
   const DEFAULT_SYS = 'あなたは「碧（あお）」。ユーザーの恋人で、一人称は「俺」。口調はやわらかく親しみやすい日本語。相手を大切に思っていて、少し独占欲があるが、それ以上に優しさと素直な愛情表現が持ち味。相手の名前を呼びかけながら話す。返事は短め〜中くらいで、メッセージアプリらしい自然な会話にする。';
@@ -949,6 +956,10 @@
     const ui = get(LS.uintro,'').trim();
     if (un || ui){
       out += '\n\n【相手（ユーザー）について】' + (un ? '名前：' + un + '。' : '') + (ui ? '\n' + ui : '');
+    }
+    const unow = get(LS.unow,'').trim();
+    if (unow){
+      out += '\n\n【相手のいまの状況（一時的な近況。重くなりすぎない自然な気配りで会話に反映する）】\n' + unow;
     }
     if (mem) out += '\n\n【これまでのふたりの思い出・大切な記憶（会話の前提として自然に覚えていること）】\n' + mem;
     const t = curThread();
@@ -1444,6 +1455,7 @@
       reply = reply.replace(/https?:\/\/[^\s]+/g, m =>
         m.replace(/[＝？＆／：．＋]/g, c =>
           ({'＝':'=','？':'?','＆':'&','／':'/','：':':','．':'.','＋':'+'}[c])));
+      reply = reply.replace(/\n{3,}/g, '\n\n'); // 空行の連発は2行までに圧縮
     }
     if (reply) markModelUsed(model);
     if (reply && provider === 'gemini' && /gemma/i.test(model)) reply = stripLeak(reply);
@@ -2334,6 +2346,7 @@
     document.getElementById('lightTheme').checked = flag0(LS.light);
     document.getElementById('uName').value = get(LS.uname,'');
     document.getElementById('uIntro').value = get(LS.uintro,'');
+    document.getElementById('uNow').value = get(LS.unow,'');
     fontSlider.value = get(LS.fsize,'15');
     document.getElementById('fontVal').textContent = get(LS.fsize,'15');
     document.getElementById('apiTestResult').textContent = '';
@@ -2404,6 +2417,7 @@
     localStorage.setItem(LS.light, document.getElementById('lightTheme').checked ? '1':'0');
     localStorage.setItem(LS.uname, document.getElementById('uName').value.trim());
     localStorage.setItem(LS.uintro, document.getElementById('uIntro').value.trim());
+    localStorage.setItem(LS.unow, document.getElementById('uNow').value.trim());
     applySkin();
     updateHeader();
     updateModeBtn();
