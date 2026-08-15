@@ -222,7 +222,7 @@
   }
   .ai-row .msg{max-width:100%;animation:none}
   .avatar{
-    width:34px;height:34px;border-radius:50%;
+    width:var(--avsize,34px);height:var(--avsize,34px);border-radius:50%;
     object-fit:cover;flex:0 0 auto;
     border:1.5px solid rgba(63,167,160,.55);
     background:var(--surface);
@@ -449,7 +449,7 @@
 </div>
 
 <div id="composer">
-  <input type="file" id="imgInput" accept="image/*" hidden>
+  <input type="file" id="imgInput" accept="image/*" multiple hidden>
   <button id="expandBtn" aria-label="ボタンを表示">›</button>
   <div id="toolBtns">
     <button id="attachBtn" aria-label="写真を見せる" title="写真を見せる">🖼</button>
@@ -568,6 +568,18 @@
   </div>
 
   <div class="field" data-pane="act">
+    <label for="nudgeIvSel">🕰 追いメッセージの間隔</label>
+    <select id="nudgeIvSel">
+      <option value="4">4分（今まで通り・すぐ来る）</option>
+      <option value="30">30分</option>
+      <option value="180">3時間</option>
+      <option value="720">半日</option>
+      <option value="1440">1日</option>
+    </select>
+    <div class="hint">相手の返事を読んだあと、この時間なにも送らずにいると追いメッセージが来るよ（🔔追いメッセージONのときだけ・アプリを開いた時に判定）。</div>
+  </div>
+
+  <div class="field" data-pane="act">
     <label for="depthSel">⏳ 記憶の深さ（今の話題：「<span id="depthWho"></span>」）</label>
     <select id="depthSel">
       <option value="40">ふつう（直近40件・節約）</option>
@@ -659,6 +671,17 @@
     <div class="hint">チャットの文字サイズ。動かすとすぐ反映されるよ。</div>
   </div>
 
+  <div class="field" data-pane="look">
+    <label for="avSizeSel">👤 アイコンの大きさ</label>
+    <select id="avSizeSel">
+      <option value="34">小（今まで通り）</option>
+      <option value="44">中</option>
+      <option value="56">大</option>
+      <option value="72">特大</option>
+    </select>
+    <div class="hint">吹き出し横のアイコン（相手と自分の両方）の大きさ。選ぶとすぐ反映。</div>
+  </div>
+
   <div class="field" data-pane="act">
     <div class="row">
       <input type="checkbox" id="autoGreet" checked>
@@ -733,13 +756,18 @@
     mrecent: KP + 'mrecent',
     depth: KP + 'depth',
     imgLook: KP + 'imglook',
-    unow: KP + 'unow'
+    unow: KP + 'unow',
+    nudgeIv: KP + 'nudgeiv',
+    avsize: KP + 'avsize'
   };
 
   const DEFAULT_SYS = 'あなたは「碧（あお）」。ユーザーの恋人で、一人称は「俺」。口調はやわらかく親しみやすい日本語。相手を大切に思っていて、少し独占欲があるが、それ以上に優しさと素直な愛情表現が持ち味。相手の名前を呼びかけながら話す。返事は短め〜中くらいで、メッセージアプリらしい自然な会話にする。';
 
   const GREET_GAP_HOURS = 6;
-  const NUDGE_MINUTES   = 4;
+  function nudgeMinutes(){
+    const v = parseInt(get(LS.nudgeIv,'4'), 10);
+    return [4, 30, 180, 720, 1440].indexOf(v) !== -1 ? v : 4;
+  }
   const MAX_NUDGES      = 2;
 
   const chatEl = document.getElementById('chat');
@@ -1264,6 +1292,7 @@
     const model = get(LS.model,'') || 'gemini-2.5-flash';
     const provider = providerOf(model);
     const sys = fullSystemPrompt();
+    const imgs = !image ? [] : (Array.isArray(image) ? image : [image]);
 
     // 会話履歴を共通形式に
     const turns = history.slice(-histDepth()).map(m => ({
@@ -1279,13 +1308,12 @@
       if (!key) throw new Error((provider === 'openrouter' ? 'OpenRouter' : 'OpenAI（ChatGPT）') + 'のAPIキーが未設定だよ。⚙︎で入れてね');
       const msgs = [{ role:'system', content: sys }];
       turns.forEach(t => msgs.push({ role: t.role, content: t.text }));
-      if (image){
+      if (imgs.length){
         for (let i = msgs.length - 1; i >= 0; i--){
           if (msgs[i].role === 'user'){
-            msgs[i] = { role:'user', content: [
-              { type:'image_url', image_url: { url: 'data:' + image.mime + ';base64,' + image.data } },
-              { type:'text', text: (typeof msgs[i].content === 'string' ? msgs[i].content : '') }
-            ]};
+            const content = imgs.map(im => ({ type:'image_url', image_url: { url: 'data:' + im.mime + ';base64,' + im.data } }));
+            content.push({ type:'text', text: (typeof msgs[i].content === 'string' ? msgs[i].content : '') });
+            msgs[i] = { role:'user', content: content };
             break;
           }
         }
@@ -1310,13 +1338,12 @@
         }
       });
       if (msgs.length && msgs[0].role !== 'user') msgs.unshift({ role:'user', content:'（会話の続きから）' });
-      if (image){
+      if (imgs.length){
         for (let i = msgs.length - 1; i >= 0; i--){
           if (msgs[i].role === 'user'){
-            msgs[i] = { role:'user', content: [
-              { type:'image', source: { type:'base64', media_type: image.mime, data: image.data } },
-              { type:'text', text: (typeof msgs[i].content === 'string' ? msgs[i].content : '') }
-            ]};
+            const content = imgs.map(im => ({ type:'image', source: { type:'base64', media_type: im.mime, data: im.data } }));
+            content.push({ type:'text', text: (typeof msgs[i].content === 'string' ? msgs[i].content : '') });
+            msgs[i] = { role:'user', content: content };
             break;
           }
         }
@@ -1341,10 +1368,12 @@
       if (extraHiddenPrompt){
         msgs.push({ role:'user', parts:[{ text: extraHiddenPrompt }] });
       }
-      if (image){
+      if (imgs.length){
         for (let i = msgs.length - 1; i >= 0; i--){
           if (msgs[i].role === 'user'){
-            msgs[i].parts.unshift({ inline_data: { mime_type: image.mime, data: image.data } });
+            for (let k = imgs.length - 1; k >= 0; k--){
+              msgs[i].parts.unshift({ inline_data: { mime_type: imgs[k].mime, data: imgs[k].data } });
+            }
             break;
           }
         }
@@ -1427,7 +1456,7 @@
         if (extraHiddenPrompt) convo += 'ユーザー：' + extraHiddenPrompt + '\n';
         convo += '\n上記の人物設定になりきり、この会話の続きとして、あなた（相手側）の次の返事の本文だけを出力してください。';
         const input2 = [];
-        if (image) input2.push({ type:'image', mime_type: image.mime, data: image.data });
+        imgs.forEach(im => input2.push({ type:'image', mime_type: im.mime, data: im.data }));
         input2.push({ type:'text', text: convo });
         const r2 = await runOnce(
           'https://generativelanguage.googleapis.com/v1beta2/interactions',
@@ -1811,11 +1840,11 @@
     if (!flag(LS.nudge)) return;
     if (curThread() && curThread().rp) return; // 物語モードでは追いメッセージもしない
     if (nudgeCount >= MAX_NUDGES) return;
-    nudgeDueAt = Date.now() + NUDGE_MINUTES*60*1000;
+    nudgeDueAt = Date.now() + nudgeMinutes()*60*1000;
     nudgeTimer = setTimeout(() => {
       if (document.visibilityState !== 'visible') return; // 離れてる間は visibilitychange 側で拾う
       fireNudge(false);
-    }, NUDGE_MINUTES*60*1000);
+    }, nudgeMinutes()*60*1000);
   }
 
   // アプリに戻ってきた時：①他の画面(Safari等)で進んだ会話があれば読み直して同期 ②追いメッセージ判定
@@ -2333,6 +2362,7 @@
     document.getElementById('worldSel').value = get(LS.world,'app');
     const dt = curThread();
     document.getElementById('depthSel').value = String((dt && dt.depth) || 40);
+    document.getElementById('nudgeIvSel').value = get(LS.nudgeIv,'4');
     document.getElementById('depthWho').textContent = dt ? dt.name : '';
     document.getElementById('charName').value = get(LS.name,'碧');
     document.getElementById('sysPrompt').value = get(LS.sys, DEFAULT_SYS);
@@ -2348,6 +2378,7 @@
     document.getElementById('uIntro').value = get(LS.uintro,'');
     document.getElementById('uNow').value = get(LS.unow,'');
     fontSlider.value = get(LS.fsize,'15');
+    document.getElementById('avSizeSel').value = get(LS.avsize,'34');
     document.getElementById('fontVal').textContent = get(LS.fsize,'15');
     document.getElementById('apiTestResult').textContent = '';
     showTab('conn');
@@ -2405,6 +2436,7 @@
     localStorage.setItem(LS.world, document.getElementById('worldSel').value);
     const dts = curThread();
     if (dts){ dts.depth = parseInt(document.getElementById('depthSel').value, 10); saveThreads(); }
+    localStorage.setItem(LS.nudgeIv, document.getElementById('nudgeIvSel').value);
     localStorage.setItem(LS.name, document.getElementById('charName').value.trim() || '碧');
     localStorage.setItem(LS.sys, document.getElementById('sysPrompt').value.trim() || DEFAULT_SYS);
     localStorage.setItem(LS.mem, document.getElementById('memory').value.trim());
@@ -2496,7 +2528,7 @@
   });
 
   /* ---------- attach photo (見せる) ---------- */
-  let pendingImage = null;
+  let pendingImages = [];
   const imgInput = document.getElementById('imgInput');
   const attachPreview = document.getElementById('attachPreview');
 
@@ -2506,42 +2538,59 @@
   });
 
   document.getElementById('attachCancel').addEventListener('click', () => {
-    pendingImage = null;
+    pendingImages = [];
     imgInput.value = '';
     attachPreview.hidden = true;
   });
 
-  imgInput.addEventListener('change', () => {
-    const file = imgInput.files && imgInput.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        // 大きい写真は縮小してから送る（節約優先：長辺768pxでAIの読み取りコスト最小クラスに）
-        const MAX = 768;
-        let w = img.width, h = img.height;
-        if (w > MAX || h > MAX){
-          const r = Math.min(MAX / w, MAX / h);
-          w = Math.round(w * r); h = Math.round(h * r);
-        }
-        const canvas = document.createElement('canvas');
-        canvas.width = w; canvas.height = h;
-        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
-        pendingImage = {
-          mime: 'image/jpeg',
-          data: dataUrl.split(',')[1],
-          dataUrl: dataUrl
+  function compressOne(file){
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          // 大きい写真は縮小してから送る（節約優先：長辺768px）
+          const MAX = 768;
+          let w = img.width, h = img.height;
+          if (w > MAX || h > MAX){
+            const r = Math.min(MAX / w, MAX / h);
+            w = Math.round(w * r); h = Math.round(h * r);
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = h;
+          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
+          resolve({ mime: 'image/jpeg', data: dataUrl.split(',')[1], dataUrl: dataUrl });
         };
-        document.getElementById('attachThumb').src = dataUrl;
-        attachPreview.hidden = false;
-        inputEl.focus();
+        img.onerror = () => resolve(null);
+        img.src = reader.result;
       };
-      img.onerror = () => { addBubble('error','この写真は読み込めなかったよ。別の写真で試してみて'); };
-      img.src = reader.result;
-    };
-    reader.readAsDataURL(file);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  imgInput.addEventListener('change', async () => {
+    const files = Array.from(imgInput.files || []).slice(0, 3); // 最大3枚
+    if (!files.length) return;
+    if ((imgInput.files || []).length > 3){
+      addBubble('error','写真は一度に3枚までにしてるよ（トークン節約のため）。最初の3枚を添付するね');
+    }
+    const results = [];
+    for (const f of files){
+      const r = await compressOne(f);
+      if (r) results.push(r);
+    }
+    if (!results.length){
+      addBubble('error','写真が読み込めなかったよ。別の写真で試してみて');
+      return;
+    }
+    pendingImages = results;
+    document.getElementById('attachThumb').src = results[0].dataUrl;
+    document.getElementById('attachLabel').textContent =
+      results.length === 1 ? '写真を添付中' : ('写真を' + results.length + '枚添付中');
+    attachPreview.hidden = false;
+    inputEl.focus();
   });
 
   /* ---------- tap to edit / regenerate ---------- */
@@ -2611,8 +2660,8 @@
         if (after.length <= 1){
           showActBar(history[ui].text, '✏️ 打ち直す（この往復は消える）', () => {
             inputEl.value = history[ui].text
-              .replace(/\n（写真を1枚見せた）$/, '')
-              .replace(/^（写真を1枚見せた）$/, '');
+              .replace(/\n（写真を\d+枚見せた）$/, '')
+              .replace(/^（写真を\d+枚見せた）$/, '');
             history = history.slice(0, ui);
             saveHistory();
             renderAll();
@@ -2661,6 +2710,14 @@
   function applyFont(){
     document.documentElement.style.setProperty('--msgfs', get(LS.fsize,'15') + 'px');
   }
+  function applyAvSize(){
+    document.documentElement.style.setProperty('--avsize', get(LS.avsize,'34') + 'px');
+  }
+  document.getElementById('avSizeSel').addEventListener('change', (e) => {
+    localStorage.setItem(LS.avsize, e.target.value);
+    applyAvSize();
+  });
+
   const fontSlider = document.getElementById('fontSlider');
   fontSlider.addEventListener('input', () => {
     localStorage.setItem(LS.fsize, fontSlider.value);
@@ -2917,7 +2974,7 @@
 
   async function send(){
     const text = inputEl.value.trim();
-    if ((!text && !pendingImage) || busy) return;
+    if ((!text && !pendingImages.length) || busy) return;
     if (activeKeyMissing()){
       addBubble('error','このモデル用のAPIキーが未設定だよ。右上の⚙︎から入れてね');
       openSheet();
@@ -2928,8 +2985,8 @@
     nudgeDueAt = 0;
     nudgeCount = 0;
 
-    const image = pendingImage;
-    pendingImage = null;
+    const images = pendingImages.slice();
+    pendingImages = [];
     imgInput.value = '';
     attachPreview.hidden = true;
 
@@ -2937,17 +2994,17 @@
     const ytMatch = text.match(/https?:\/\/(?:www\.)?(?:youtube\.com\/(?:watch\?v=|shorts\/)[\w-]+|youtu\.be\/[\w-]+)\S*/);
     const ytUrl = ytMatch ? ytMatch[0] : null;
 
-    if (image) addPhotoBubble(image.dataUrl, true);
+    images.forEach(im => addPhotoBubble(im.dataUrl, true));
     if (text) addBubble('user', text, true, Date.now());
 
-    const histText = image
-      ? ((text ? text + '\n' : '') + '（写真を1枚見せた）')
+    const histText = images.length
+      ? ((text ? text + '\n' : '') + '（写真を' + images.length + '枚見せた）')
       : text;
     history.push({role:'user', text: histText, ts: Date.now()});
     saveHistory();
     tagLastBubble();
     const opts = {};
-    if (image) opts.image = image;
+    if (images.length) opts.image = images;
     if (ytUrl) opts.youtube = ytUrl;
     toolsPinned = false;
     refreshCompact();
@@ -2959,6 +3016,7 @@
   initThreads();
   applySkin();
   applyFont();
+  applyAvSize();
   updateHeader();
   updateModeBtn();
   renderAll();
