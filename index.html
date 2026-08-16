@@ -402,8 +402,8 @@
   }
   .menu-row:disabled{opacity:.4}
   .thread-row{
-    display:flex;align-items:center;gap:10px;
-    padding:14px 12px;
+    display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;
+    padding:12px 12px 8px;
     border:1px solid rgba(63,167,160,.25);
     border-radius:14px;
     margin-bottom:10px;
@@ -411,8 +411,12 @@
     cursor:pointer;
   }
   .thread-row.active{border-color:var(--ao);background:rgba(63,167,160,.12)}
-  .thread-name{flex:1;font-size:15px;font-weight:500}
-  .thread-time{font-size:11px;color:var(--ink-dim)}
+  .thread-name{
+    flex:1 1 100%;             /* 名前は1行まるごと使う（ﾑﾆｭｳ防止） */
+    font-size:15px;font-weight:500;line-height:1.5;
+    word-break:break-word;
+  }
+  .thread-time{font-size:11px;color:var(--ink-dim);margin-right:auto}
   .thread-del{
     background:none;border:none;color:var(--ink-dim);
     font-size:16px;padding:6px;cursor:pointer;
@@ -847,7 +851,7 @@
   function updateHeader(){
     document.getElementById('headerName').textContent = get(LS.name,'碧');
     const t = curThread();
-    document.getElementById('headerSub').textContent = t ? ((t.rp ? '🎭 ' : '💬 ') + t.name) : 'そばにいるよ';
+    document.getElementById('headerSub').textContent = t ? ((t.rp ? '📓 ' : '💬 ') + t.name) : 'そばにいるよ';
   }
 
   function lastTsOf(id){
@@ -881,7 +885,7 @@
     row.className = 'thread-row' + (t.id === curId ? ' active' : '');
     const name = document.createElement('div');
     name.className = 'thread-name';
-    name.textContent = (t.pin && !archived ? '📌 ' : '') + (t.rp ? '🎭 ' : '') + t.name;
+    name.textContent = (t.pin && !archived ? '📌 ' : '') + (t.rp ? '📓 ' : '') + t.name;
     const time = document.createElement('div');
     time.className = 'thread-time';
     time.textContent = relTime(lastTsOf(t.id)) + ' ・⏳' + (t.depth || 40);
@@ -922,7 +926,7 @@
         }));
       }
     } else {
-      // 普段の部屋：📌ピン・✏️改名・🕰/🎭モード・🗂しまう
+      // 普段の部屋：📌ピン・✏️改名・🕰/📓モード・🗂しまう
       row.appendChild(mkBtn('📌', t.pin ? 'ピン留めを外す' : '上に固定する', () => {
         t.pin = !t.pin;
         saveThreads();
@@ -938,7 +942,7 @@
         renderThreadList();
         if (t.id === curId) updateHeader();
       }));
-      row.appendChild(mkBtn(t.rp ? '🎭' : '🕰', t.rp ? '物語モード（時間を気にしない）' : '通常モード（時間を知ってる）', () => {
+      row.appendChild(mkBtn(t.rp ? '📓' : '🕰', t.rp ? '物語モード（時間を気にしない）' : '通常モード（時間を知ってる）', () => {
         t.rp = !t.rp;
         saveThreads();
         renderThreadList();
@@ -1015,7 +1019,7 @@
   document.getElementById('newThreadBtn').addEventListener('click', () => {
     const name = prompt('新しい話題の名前は？（例：旅行の相談、深夜トーク）');
     if (!name || !name.trim()) return;
-    const rp = confirm('「' + name.trim() + '」を物語モード🎭にする？\n（OK＝時間を気にせず、いつでも続きから再開できるロールプレイ用。キャンセル＝時間を知ってる通常モード）');
+    const rp = confirm('「' + name.trim() + '」を物語モード📓にする？\n（OK＝時間を気にせず、いつでも続きから再開できるロールプレイ用。キャンセル＝時間を知ってる通常モード）');
     const id = 't' + Date.now();
     threads.push({id, name: name.trim(), rp: rp});
     curId = id;
