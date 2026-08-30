@@ -586,7 +586,7 @@
     <button type="button" class="btn line" id="findImgBtn" style="margin-top:8px;padding:9px;font-size:13px">🔍 使える画像モデルを探す</button>
     <div class="hint" id="imgFindResult" style="margin-top:6px"></div>
     <label for="imgLook" style="margin-top:12px;display:block">📷用の見た目メモ（画像生成のとき最優先）</label>
-    <textarea id="imgLook" style="min-height:80px" placeholder="例：碧＝黒髪で犬っぽい雰囲気の日本人の青年。私＝眼鏡でオリーブ色の外ハネヘアの女性。絵柄はアニメイラスト風。"></textarea>
+    <textarea id="imgLook" style="min-height:110px" placeholder="例：碧＝黒髪で犬っぽい雰囲気の日本人の青年。私＝眼鏡でオリーブ色の外ハネヘアの女性。絵柄はアニメイラスト風。"></textarea>
     <div class="hint">誰が写るか・髪型・絵柄（アニメ風／イラスト風／写真風）を簡潔に。これが無いと知らない人が出がち🤣</div>
     <div class="hint">📷ボタンで使うモデル。gemini-2.5-flash-image（Geminiキー・要支払い設定）か gpt-image-1（OpenAIキー）が使えるよ。生成画像はページを閉じると消えます。</div>
   </div>
@@ -695,13 +695,13 @@
 
   <div class="field" data-pane="you">
     <label for="uIntro">私について（相手に知っておいてほしいこと）</label>
-    <textarea id="uIntro" style="min-height:90px" placeholder="誕生日、仕事、好きなもの、性格など"></textarea>
+    <textarea id="uIntro" style="min-height:130px" placeholder="誕生日、仕事、好きなもの、性格など"></textarea>
     <div class="hint">ここに書いたことは、どのモデルに切り替えても毎回の会話で相手が知ってる前提になるよ。各キャラのプロンプト内の自己紹介をここにお引っ越しするとスッキリ！</div>
   </div>
 
   <div class="field" data-pane="you">
     <label for="uNow">🌡 いまの私メモ（一時的な近況）</label>
-    <textarea id="uNow" style="min-height:70px" placeholder="例：ちょっと体調ゆらぎ中。今週は耳鼻科の結果待ちでソワソワしてる。"></textarea>
+    <textarea id="uNow" style="min-height:120px" placeholder="例：ちょっと体調ゆらぎ中。今週は耳鼻科の結果待ちでソワソワしてる。"></textarea>
     <div class="hint">この部屋・あの部屋関係なく「今の状況」として相手に伝わるよ。思い出ノートに残すほどじゃない近況用。状況が変わったら自分で書き換え・削除してね（自動では消えないよ）。</div>
   </div>
 
@@ -2719,6 +2719,11 @@
   function attachSwipeClose(sheetEl){
     let startY = null, dragging = false;
     sheetEl.addEventListener('touchstart', (e) => {
+      // 入力欄・ボタンの上から始まったスワイプ、入力中のスワイプでは閉じない
+      const t = e.target;
+      if (t && t.closest && t.closest('input,textarea,select,button')){ startY = null; return; }
+      const ae = document.activeElement;
+      if (ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)){ startY = null; return; }
       startY = e.touches[0].clientY;
       dragging = false;
     }, { passive: true });
@@ -2737,13 +2742,24 @@
       sheetEl.style.transition = '';
       sheetEl.style.transform = '';
       if (dragging && dy > 90){
-        closeSheets();
+        requestCloseSheets();
       }
       startY = null; dragging = false;
     });
   }
 
+  // ⚙︎設定を編集中に閉じようとしたら、保存し忘れを確認する
+  let sheetDirty = false;
+  function markDirty(){ sheetDirty = true; }
+  function requestCloseSheets(){
+    if (sheet.classList.contains('show') && sheetDirty){
+      if (!confirm('保存していない変更があるよ。保存せずに閉じる？')) return;
+    }
+    closeSheets();
+  }
+
   function closeSheets(){
+    sheetDirty = false;
     sheet.classList.remove('show');
     threadSheet.classList.remove('show');
     searchSheet.classList.remove('show');
@@ -2752,7 +2768,7 @@
     overlay.classList.remove('show');
   }
   document.getElementById('openSettings').addEventListener('click', openSheet);
-  overlay.addEventListener('click', closeSheets);
+  overlay.addEventListener('click', requestCloseSheets);
 
   document.getElementById('saveBtn').addEventListener('click', () => {
     localStorage.setItem(LS.key, document.getElementById('apiKey').value.trim());
@@ -2772,6 +2788,7 @@
     localStorage.setItem(LS.name, document.getElementById('charName').value.trim() || '碧');
     localStorage.setItem(LS.sys, document.getElementById('sysPrompt').value.trim() || DEFAULT_SYS);
     localStorage.setItem(LS.mem, document.getElementById('memory').value.trim());
+    localStorage.setItem(LS.amem, document.getElementById('autoMem').value.trim());
     localStorage.setItem(LS.anniv, document.getElementById('annivList').value.trim());
     localStorage.setItem(LS.greet, document.getElementById('autoGreet').checked ? '1':'0');
     localStorage.setItem(LS.nudge, document.getElementById('autoNudge').checked ? '1':'0');
@@ -3284,6 +3301,9 @@
       box.appendChild(row);
     });
   }
+
+  sheet.addEventListener('input', markDirty);
+  sheet.addEventListener('change', markDirty);
 
   [sheet, threadSheet, searchSheet, favSheet, menuSheet].forEach(attachSwipeClose);
 
