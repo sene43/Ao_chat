@@ -1930,6 +1930,28 @@
     scrollBottom();
   }
 
+  // 同じ文章を2回書いてしまった時に、後半を切り落とす
+  function dedupeRepeat(t){
+    const s = (t || '').replace(/\s+/g, ' ').trim();
+    if (s.length < 60) return t;
+    const head = s.slice(0, 24);
+    const again = s.indexOf(head, 24);
+    if (again > s.length * 0.35){
+      // 元テキストの対応位置を探して切る
+      const headRaw = t.replace(/\s+/g, ' ').slice(0, 24);
+      let count = 0, cut = -1;
+      for (let i = 0; i < t.length; i++){
+        if (t.slice(i).replace(/\s+/g, ' ').indexOf(headRaw) === 0){
+          count++;
+          if (count === 2){ cut = i; break; }
+        }
+      }
+      if (cut > 0) return t.slice(0, cut).trim();
+      return t.slice(0, Math.floor(t.length / 2)).trim();
+    }
+    return t;
+  }
+
   function addPromptBubble(text, save){
     if (save){
       history.push({ role:'model', text: text, imgp: true, ts: Date.now() });
@@ -1962,7 +1984,7 @@
     const key = get(LS.key,'');
     if (!key){ addBubble('error','画像プロンプト作りにはGeminiのAPIキーが必要だよ（無料のGemmaを使うから料金はかからない）'); return; }
     if (busy) return;
-    const askRaw = window.prompt('どんな絵にする？（空欄＝いまの会話の流れにおまかせ）\n例：ごまちゃんのアップ／ふたりで洗濯物をたたんでる／今日のお昼ごはん', '');
+    const askRaw = window.prompt('どんな絵にする？（空欄＝いまの会話の流れにおまかせ）\n例：ごまちゃんのアップ／ふたりで洗濯物をたたんでる\n「横長」と書くと横向きの構図になるよ（既定は縦長）', '');
     if (askRaw === null) return;
     const ask = askRaw.trim();
     busy = true;
@@ -1974,8 +1996,7 @@
       const uname = get(LS.uname,'') || '私';
       const conv = history.filter(m => !m.hidden && !m.diary && !m.imgp).slice(-10)
         .map(m => (m.role === 'model' ? cname : uname) + '：' + m.text).join('\n');
-      const p = '次の会話の「いまの場面」を、画像生成AIに渡すプロンプトにしてください。\n' +
-        (look ? '【登場人物の見た目・画風（人物が写る場合は必ず反映）】\n' + look + '\n\n' : '') +
+      const p = '次の会話から「いまの場面」を読み取り、画像生成AIに渡す【場面の説明】だけを書いてください。\n' +
         (ask ? '【今回のリクエスト（最優先。これを主役にする）】' + ask + '\n\n' : '') +
         '【会話】\n' + conv + '\n\n' +
         '【とても大事なこと】\n' +
@@ -1983,10 +2004,9 @@
         '・主役は人物とはかぎらない。ペット・食べ物・景色・手元など、その場面の主役が人以外ならそれを主役にし、人物を無理に入れない。\n' +
         '・離れている場面（メッセージのやりとり）なら、ふたりが同じ場所にいる絵にはしない。\n' +
         '・「顔を寄せ合う」「見つめ合う」などの定番の恋人構図は、会話が実際にその場面でない限り使わない。\n' +
+        '・キャラクターの髪型・服装・顔立ち・画風には触れないこと（それは別に用意してあるので書かなくてよい）。\n' +
         '・毎回ちがう場面になるように、直前に作ったプロンプトの真似をしない。\n\n' +
-        '【書き方】日本語で、そのまま画像生成AIに貼れる文章にする。次の順で、全体で200字程度：\n' +
-        '1) 場所と時間帯　2) 主役（人・ペット・物）とその見た目　3) 何が起きているか・表情や空気感　4) 構図（スマホの自撮り／手元アップ／引きの風景など）　5) 画風と雰囲気\n' +
-        '説明・前置き・見出し・箇条書き記号は書かず、プロンプト本文だけを出力すること。';
+        '【書き方】日本語で120字程度。「場所と時間帯 → 誰（または何）が → 何をしているか → 構図」の順に、ひと続きの文章で書く。同じ文章を二度書かない。説明・前置き・見出し・記号は書かず、場面の文章だけを出力すること。';
       const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemma-4-31b-it:generateContent?key=' + encodeURIComponent(key), {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ contents:[{ role:'user', parts:[{ text: p }] }] })
@@ -2000,8 +2020,15 @@
         try { txt = data.candidates[0].content.parts.map(pp => pp.text || '').join(''); } catch(e){}
         try { if (data.usageMetadata) addTokens(data.usageMetadata.promptTokenCount, data.usageMetadata.candidatesTokenCount, 'gemma-4-31b-it'); } catch(e){}
         try { txt = stripLeak(txt); } catch(e){}
-        txt = (txt || '').trim();
-        if (txt) addPromptBubble(txt, true);
+        txt = dedupeRepeat((txt || '').trim());
+        if (txt){
+          const landscape = /横長|横位置|ワイド|landscape/i.test(ask);
+          let out = '【この場面】\n' + txt;
+          if (look) out += '\n\n【登場人物と画風（この指定を最優先で厳守。要約せずそのまま反映すること）】\n' + look;
+          out += '\n\n【画面】' + (landscape ? '横長（16:9）' : '縦長（3:4）') +
+                 '。主役が見切れないよう全体を画面内に収める。指定した髪型・服装・画風は必ず守ること。';
+          addPromptBubble(out, true);
+        }
         else addBubble('error','プロンプトが空だったよ。もう一度試してみて');
       }
     } catch(e){
