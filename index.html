@@ -1994,7 +1994,7 @@
       const look = get(LS.imgLook,'').trim();
       const cname = get(LS.name,'碧');
       const uname = get(LS.uname,'') || '私';
-      const conv = history.filter(m => !m.hidden && !m.diary && !m.imgp).slice(-10)
+      const conv = history.filter(m => !m.hidden && !m.diary && !m.imgp).slice(-12)
         .map(m => (m.role === 'model' ? cname : uname) + '：' + m.text).join('\n');
       const p = '次の会話から「いまの場面」を読み取り、画像生成AIに渡す【場面の説明】だけを書いてください。\n' +
         (ask ? '【今回のリクエスト（最優先。これを主役にする）】' + ask + '\n\n' : '') +
@@ -2016,11 +2016,14 @@
       if (!res.ok){
         addBubble('error','プロンプトを作れなかった…（' + ((data && data.error && data.error.message) || ('HTTP ' + res.status)) + '）');
       } else {
-        let txt = '';
-        try { txt = data.candidates[0].content.parts.map(pp => pp.text || '').join(''); } catch(e){}
+        let raw = '';
+        try { raw = data.candidates[0].content.parts.map(pp => pp.text || '').join(''); } catch(e){}
         try { if (data.usageMetadata) addTokens(data.usageMetadata.promptTokenCount, data.usageMetadata.candidatesTokenCount, 'gemma-4-31b-it'); } catch(e){}
+        let txt = raw;
         try { txt = stripLeak(txt); } catch(e){}
         txt = dedupeRepeat((txt || '').trim());
+        // 掃除しすぎて空になった時は、掃除前の文章を使う
+        if (!txt && raw && raw.trim()) txt = raw.trim();
         if (txt){
           const landscape = /横長|横位置|ワイド|landscape/i.test(ask);
           let out = '【この場面】\n' + txt;
@@ -2029,7 +2032,15 @@
                  '。主役が見切れないよう全体を画面内に収める。指定した髪型・服装・画風は必ず守ること。';
           addPromptBubble(out, true);
         }
-        else addBubble('error','プロンプトが空だったよ。もう一度試してみて');
+        else {
+          let why = '';
+          try {
+            const fr = data.candidates && data.candidates[0] && data.candidates[0].finishReason;
+            const bk = data.promptFeedback && data.promptFeedback.blockReason;
+            why = '（' + (fr ? 'finishReason: ' + fr : '返答が空') + (bk ? ' / block: ' + bk : '') + '）';
+          } catch(e){}
+          addBubble('error','プロンプトが空だったよ ' + why + ' 少し時間を置くか、会話を少し進めてからもう一度試してみて');
+        }
       }
     } catch(e){
       typing.remove();
