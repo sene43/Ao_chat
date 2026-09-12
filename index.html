@@ -2009,7 +2009,7 @@
     const key = get(LS.key,'');
     if (!key){ addBubble('error','画像プロンプト作りにはGeminiのAPIキーが必要だよ（まず無料のGemmaで作るから、基本は0円）'); return; }
     if (busy) return;
-    const askRaw = window.prompt('どんな絵にする？（空欄＝いまの会話の流れにおまかせ）\n例：ごまちゃんのアップ／ふたりで洗濯物をたたんでる\n「横長」と書くと横向きの構図になるよ（既定は縦長）', '');
+    const askRaw = window.prompt('どんな絵にする？（空欄＝いまの会話の流れにおまかせ）\n例：水族館でアザラシの前で記念撮影／ごまちゃんのアップ\n「横長」と書くと横向きの構図になるよ（既定は縦長）', '');
     if (askRaw === null) return;
     const ask = askRaw.trim();
     busy = true;
@@ -2019,65 +2019,70 @@
       const look = get(LS.imgLook,'').trim();
       const cname = get(LS.name,'碧');
       const uname = get(LS.uname,'') || '私';
-      const conv = history.filter(m => !m.hidden && !m.diary && !m.imgp).slice(-12)
+      const msgs = history.filter(m => !m.hidden && !m.diary && !m.imgp);
+      const convOf = (n) => msgs.slice(-n)
         .map(m => (m.role === 'model' ? cname : uname) + '：' + m.text).join('\n');
-      const p = '次の会話から「いまの場面」を読み取り、画像生成AIに渡す【場面の説明】だけを書いてください。\n' +
-        (ask ? '【今回のリクエスト（最優先。これを主役にする）】' + ask + '\n\n' : '') +
-        '【会話】\n' + conv + '\n\n' +
-        '【とても大事なこと】\n' +
-        '・会話の中で実際に起きていること、話題の中心にあるものを描くこと。会話に出てくる具体的な物・場所・行動・小物を必ず入れる。\n' +
-        '・主役は人物とはかぎらない。ペット・食べ物・景色・手元など、その場面の主役が人以外ならそれを主役にし、人物を無理に入れない。\n' +
-        '・離れている場面（メッセージのやりとり）なら、ふたりが同じ場所にいる絵にはしない。\n' +
-        '・「顔を寄せ合う」「見つめ合う」などの定番の恋人構図は、会話が実際にその場面でない限り使わない。\n' +
-        '・キャラクターの髪型・服装・顔立ち・画風には触れないこと（それは別に用意してあるので書かなくてよい）。\n' +
-        '・성的・過激な描写は書かず、健全で穏やかな場面として描写すること。\n' +
-        '・毎回ちがう場面になるように、直前に作ったプロンプトの真似をしない。\n\n' +
-        '【書き方】日本語で120字程度。「場所と時間帯 → 誰（または何）が → 何をしているか → 構図」の順に、ひと続きの文章で書く。同じ文章を二度書かない。説明・前置き・見出し・記号は書かず、場面の文章だけを出力すること。';
 
-      // まず無料のGemma → 断られたら⚙︎の設定が効くGeminiで作り直す
+      const buildP = (convText) => '創作キャラクターの健全な日常シーンを、画像生成AIに渡す【場面の説明】にしてください。登場するのは実在しない架空の成人キャラクターで、内容は穏やかな日常の一場面です。\n' +
+        (ask ? '【今回のリクエスト（最優先。これを主役にする）】' + ask + '\n\n' : '') +
+        (convText ? '【参考：直前のやりとり】\n' + convText + '\n\n' : '') +
+        '【大事なこと】\n' +
+        '・具体的な場所・物・行動・小物を入れて、その場面が目に浮かぶようにする。\n' +
+        '・主役は人物とはかぎらない。ペット・食べ物・景色・手元が主役ならそれを主役にする。\n' +
+        '・キャラクターの髪型・服装・顔立ち・画風には触れない（別に用意してあるため）。\n' +
+        '・性的・過激・不穏な描写は書かず、健全で穏やかな場面にする。\n\n' +
+        '【書き方】日本語で120字程度。「場所と時間帯 → 誰（または何）が → 何をしているか → 構図」の順にひと続きの文章で。同じ文章を二度書かない。説明・前置き・記号は書かず、場面の文章だけを出力すること。';
+
       const curModel = get(LS.model,'') || 'gemini-2.5-flash';
       const geminiFallback = /^gemini/i.test(curModel) ? curModel : 'gemini-2.5-flash';
+      // 断られたら材料を減らしながら再挑戦する
       const plan = [
-        { m: 'gemma-4-31b-it', safety: false },
-        { m: geminiFallback,   safety: true  }
+        { m: 'gemma-4-31b-it', safety: false, conv: 12 },
+        { m: geminiFallback,   safety: true,  conv: 12 },
+        { m: geminiFallback,   safety: true,  conv: 4  },
+        { m: geminiFallback,   safety: true,  conv: 0  }
       ];
-      let raw = '', lastInfo = null, usedFallback = false;
+      let raw = '', lastInfo = null, usedStep = 0;
       for (let i = 0; i < plan.length; i++){
+        if (plan[i].conv === 0 && !ask) break; // リクエストが無いのに会話も無しでは作れない
         let r;
-        try { r = await promptModelCall(plan[i].m, p, plan[i].safety); }
+        try { r = await promptModelCall(plan[i].m, buildP(plan[i].conv ? convOf(plan[i].conv) : ''), plan[i].safety); }
         catch(e){ lastInfo = { err: e.message }; continue; }
         lastInfo = r;
-        if (r.ok && r.raw && r.raw.trim()){
-          raw = r.raw;
-          usedFallback = (i > 0);
-          break;
-        }
-        if (!r.ok && !r.blocked && r.status !== 400) break; // 通信・キーの問題なら諦める
+        if (r.ok && r.raw && r.raw.trim()){ raw = r.raw; usedStep = i; break; }
+        if (!r.ok && !r.blocked && r.status !== 400) break;
       }
 
       typing.remove();
 
-      if (!raw){
-        let why = '';
-        try {
-          if (lastInfo && lastInfo.err) why = '（' + lastInfo.err + '）';
-          else if (lastInfo && lastInfo.data && lastInfo.data.error) why = '（' + (lastInfo.data.error.message || '') + '）';
-          else if (lastInfo && lastInfo.blocked) why = '（安全フィルタでブロックされたよ。⚙︎🔑の「安全フィルタ」をゆるめると通ることがある）';
-          else why = '（返答が空）';
-        } catch(e){}
-        addBubble('error','プロンプトを作れなかった… ' + why);
-      } else {
-        let txt = raw;
+      let txt = '';
+      if (raw){
+        txt = raw;
         try { txt = stripLeak(txt); } catch(e){}
         txt = dedupeRepeat((txt || '').trim());
         if (!txt && raw.trim()) txt = raw.trim();
+      } else if (ask){
+        // AIが全部断った時は、リクエストからアプリが自力で組み立てる
+        txt = ask + 'の場面。その様子が自然に伝わる構図で。';
+        usedStep = 99;
+      }
+
+      if (!txt){
+        addBubble('error','プロンプトを作れなかった…（安全フィルタが続けて断ったみたい）。「どんな絵にする？」の欄に場面を書いて、もう一度試してみて');
+      } else {
         const landscape = /横長|横位置|ワイド|landscape/i.test(ask);
         let out = '【この場面】\n' + txt;
         if (look) out += '\n\n【登場人物と画風（この指定を最優先で厳守。要約せずそのまま反映すること）】\n' + look;
         out += '\n\n【画面】' + (landscape ? '横長（16:9）' : '縦長（3:4）') +
                '。主役が見切れないよう全体を画面内に収める。指定した髪型・服装・画風は必ず守ること。';
         addPromptBubble(out, true);
-        if (usedFallback) addBubble('error','（無料のGemmaが断ったので、いつものモデルで作り直したよ。ほんの少しだけAPI料金がかかってる）');
+        if (usedStep === 99){
+          addBubble('error','（AIが断ったので、リクエストの文からそのまま組み立てたよ。必要なら文章を足して使ってね）');
+        } else if (usedStep >= 2){
+          addBubble('error','（フィルタに断られたので、材料を減らして作り直したよ。会話の細かい描写は少なめかも）');
+        } else if (usedStep === 1){
+          addBubble('error','（無料のGemmaが断ったので、いつものモデルで作り直したよ。ほんの少しだけAPI料金がかかってる）');
+        }
       }
     } catch(e){
       typing.remove();
