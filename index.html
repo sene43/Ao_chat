@@ -1980,9 +1980,34 @@
     scrollBottom();
   }
 
+  // 画像プロンプト用の1回呼び出し（Gemmaは無料だが安全フィルタ固定、Geminiは⚙︎の設定が効く）
+  async function promptModelCall(model, text, useSafety){
+    const key = get(LS.key,'');
+    const body = { contents: [{ role:'user', parts: [{ text: text }] }] };
+    if (useSafety){
+      const ss = safetySettings();
+      if (ss) body.safetySettings = ss;
+    }
+    const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' +
+      encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(key), {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    let raw = '';
+    try { raw = data.candidates[0].content.parts.map(pp => pp.text || '').join(''); } catch(e){}
+    try { if (data.usageMetadata) addTokens(data.usageMetadata.promptTokenCount, data.usageMetadata.candidatesTokenCount, model); } catch(e){}
+    let blocked = false;
+    try {
+      const fr = data.candidates && data.candidates[0] && data.candidates[0].finishReason;
+      const bk = data.promptFeedback && data.promptFeedback.blockReason;
+      blocked = !!bk || fr === 'SAFETY' || fr === 'PROHIBITED_CONTENT' || fr === 'BLOCKLIST';
+    } catch(e){}
+    return { ok: res.ok, data: data, raw: raw, blocked: blocked, status: res.status };
+  }
+
   async function makeImagePrompt(){
     const key = get(LS.key,'');
-    if (!key){ addBubble('error','画像プロンプト作りにはGeminiのAPIキーが必要だよ（無料のGemmaを使うから料金はかからない）'); return; }
+    if (!key){ addBubble('error','画像プロンプト作りにはGeminiのAPIキーが必要だよ（まず無料のGemmaで作るから、基本は0円）'); return; }
     if (busy) return;
     const askRaw = window.prompt('どんな絵にする？（空欄＝いまの会話の流れにおまかせ）\n例：ごまちゃんのアップ／ふたりで洗濯物をたたんでる\n「横長」と書くと横向きの構図になるよ（既定は縦長）', '');
     if (askRaw === null) return;
@@ -2005,42 +2030,54 @@
         '・離れている場面（メッセージのやりとり）なら、ふたりが同じ場所にいる絵にはしない。\n' +
         '・「顔を寄せ合う」「見つめ合う」などの定番の恋人構図は、会話が実際にその場面でない限り使わない。\n' +
         '・キャラクターの髪型・服装・顔立ち・画風には触れないこと（それは別に用意してあるので書かなくてよい）。\n' +
+        '・성的・過激な描写は書かず、健全で穏やかな場面として描写すること。\n' +
         '・毎回ちがう場面になるように、直前に作ったプロンプトの真似をしない。\n\n' +
         '【書き方】日本語で120字程度。「場所と時間帯 → 誰（または何）が → 何をしているか → 構図」の順に、ひと続きの文章で書く。同じ文章を二度書かない。説明・前置き・見出し・記号は書かず、場面の文章だけを出力すること。';
-      const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemma-4-31b-it:generateContent?key=' + encodeURIComponent(key), {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ contents:[{ role:'user', parts:[{ text: p }] }] })
-      });
-      const data = await res.json();
+
+      // まず無料のGemma → 断られたら⚙︎の設定が効くGeminiで作り直す
+      const curModel = get(LS.model,'') || 'gemini-2.5-flash';
+      const geminiFallback = /^gemini/i.test(curModel) ? curModel : 'gemini-2.5-flash';
+      const plan = [
+        { m: 'gemma-4-31b-it', safety: false },
+        { m: geminiFallback,   safety: true  }
+      ];
+      let raw = '', lastInfo = null, usedFallback = false;
+      for (let i = 0; i < plan.length; i++){
+        let r;
+        try { r = await promptModelCall(plan[i].m, p, plan[i].safety); }
+        catch(e){ lastInfo = { err: e.message }; continue; }
+        lastInfo = r;
+        if (r.ok && r.raw && r.raw.trim()){
+          raw = r.raw;
+          usedFallback = (i > 0);
+          break;
+        }
+        if (!r.ok && !r.blocked && r.status !== 400) break; // 通信・キーの問題なら諦める
+      }
+
       typing.remove();
-      if (!res.ok){
-        addBubble('error','プロンプトを作れなかった…（' + ((data && data.error && data.error.message) || ('HTTP ' + res.status)) + '）');
+
+      if (!raw){
+        let why = '';
+        try {
+          if (lastInfo && lastInfo.err) why = '（' + lastInfo.err + '）';
+          else if (lastInfo && lastInfo.data && lastInfo.data.error) why = '（' + (lastInfo.data.error.message || '') + '）';
+          else if (lastInfo && lastInfo.blocked) why = '（安全フィルタでブロックされたよ。⚙︎🔑の「安全フィルタ」をゆるめると通ることがある）';
+          else why = '（返答が空）';
+        } catch(e){}
+        addBubble('error','プロンプトを作れなかった… ' + why);
       } else {
-        let raw = '';
-        try { raw = data.candidates[0].content.parts.map(pp => pp.text || '').join(''); } catch(e){}
-        try { if (data.usageMetadata) addTokens(data.usageMetadata.promptTokenCount, data.usageMetadata.candidatesTokenCount, 'gemma-4-31b-it'); } catch(e){}
         let txt = raw;
         try { txt = stripLeak(txt); } catch(e){}
         txt = dedupeRepeat((txt || '').trim());
-        // 掃除しすぎて空になった時は、掃除前の文章を使う
-        if (!txt && raw && raw.trim()) txt = raw.trim();
-        if (txt){
-          const landscape = /横長|横位置|ワイド|landscape/i.test(ask);
-          let out = '【この場面】\n' + txt;
-          if (look) out += '\n\n【登場人物と画風（この指定を最優先で厳守。要約せずそのまま反映すること）】\n' + look;
-          out += '\n\n【画面】' + (landscape ? '横長（16:9）' : '縦長（3:4）') +
-                 '。主役が見切れないよう全体を画面内に収める。指定した髪型・服装・画風は必ず守ること。';
-          addPromptBubble(out, true);
-        }
-        else {
-          let why = '';
-          try {
-            const fr = data.candidates && data.candidates[0] && data.candidates[0].finishReason;
-            const bk = data.promptFeedback && data.promptFeedback.blockReason;
-            why = '（' + (fr ? 'finishReason: ' + fr : '返答が空') + (bk ? ' / block: ' + bk : '') + '）';
-          } catch(e){}
-          addBubble('error','プロンプトが空だったよ ' + why + ' 少し時間を置くか、会話を少し進めてからもう一度試してみて');
-        }
+        if (!txt && raw.trim()) txt = raw.trim();
+        const landscape = /横長|横位置|ワイド|landscape/i.test(ask);
+        let out = '【この場面】\n' + txt;
+        if (look) out += '\n\n【登場人物と画風（この指定を最優先で厳守。要約せずそのまま反映すること）】\n' + look;
+        out += '\n\n【画面】' + (landscape ? '横長（16:9）' : '縦長（3:4）') +
+               '。主役が見切れないよう全体を画面内に収める。指定した髪型・服装・画風は必ず守ること。';
+        addPromptBubble(out, true);
+        if (usedFallback) addBubble('error','（無料のGemmaが断ったので、いつものモデルで作り直したよ。ほんの少しだけAPI料金がかかってる）');
       }
     } catch(e){
       typing.remove();
