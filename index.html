@@ -774,6 +774,8 @@
   <button class="btn line" data-pane="data" id="backupBtn">💾 バックアップを保存（設定＋思い出＋会話）</button>
   <button class="btn line" data-pane="data" id="restoreBtn">📂 バックアップから復元</button>
   <button class="btn line" data-pane="data" id="exportBtn">📜 この話題を読み物として保存</button>
+  <button class="btn line" data-pane="data" id="syncPackBtn">🤝 ChatGPT用の同期パックを保存</button>
+  <div class="hint" data-pane="data">キャラクター設定・思い出・画像用の見た目などを、ChatGPTへ渡せる安全なファイルにします。APIキーは入りません。</div>
   <input type="file" id="restoreInput" accept="application/json,.json" hidden>
   <div class="hint" data-pane="data">バックアップにはAPIキーも含まれるから、ファイルは人に送らず大切に保管してね🔐</div>
   <button class="btn line" data-pane="data" id="clearKeysBtn">🔑 APIキーだけを消す</button>
@@ -1436,13 +1438,17 @@
 
   // ---- 料金の概算（100万トークンあたりのUSD単価。2026年7月時点の目安） ----
   const JPY_RATE = 150; // 1ドル＝何円で換算するか（ここを書き換えれば調整できるよ）
+  // 期間限定セールの終了日時（この時刻より前はセール価格で計算）
+  const PROMO_UNTIL_2026 = new Date(2027, 0, 1).getTime();   // 2026/12/31まで半額 → 2027/1/1から正規料金
+
+  // [モデル名の判定, 入力単価, 出力単価, (任意)セール情報]  ※100万トークンあたりUSD
   const MODEL_PRICES = [
     [/gemma/i,                   0,    0   ],  // Gemmaは無料枠
     [/gemini-2\.5-flash-lite/i,  0.10, 0.40],
     [/gemini-2\.5-flash/i,       0.30, 2.50],
     [/gemini-3\.5-flash-lite/i,  0.30, 2.50],
     [/gemini-3\.5-flash/i,       1.50, 9.00],
-    [/gemini-3\.6-flash/i,       1.50, 7.50],
+    [/gemini-3\.[678]-flash(?!-lite)/i, 1.50, 7.50, { until: PROMO_UNTIL_2026, in: 0.75, out: 3.75 }],  // 3.6/3.7/3.8は同料金・年内は半額
     [/gemini-2\.5-pro/i,         1.25, 10.0],
     [/haiku/i,                   1.00, 5.00],
     [/sonnet-5/i,                2.00, 10.0],
@@ -1456,8 +1462,11 @@
   ];
   function estCostUSD(model, inTok, outTok){
     for (let i = 0; i < MODEL_PRICES.length; i++){
-      if (MODEL_PRICES[i][0].test(model)){
-        return (inTok * MODEL_PRICES[i][1] + outTok * MODEL_PRICES[i][2]) / 1000000;
+      const e = MODEL_PRICES[i];
+      if (e[0].test(model)){
+        let pin = e[1], pout = e[2];
+        if (e[3] && Date.now() < e[3].until){ pin = e[3].in; pout = e[3].out; }  // セール期間中は自動でセール価格
+        return (inTok * pin + outTok * pout) / 1000000;
       }
     }
     return null; // 単価表にないモデルは料金不明（トークン数だけ数える）
@@ -2156,8 +2165,16 @@
       const isPlan = /約束|予定|行く|来る|会う|買う|明日|明後日|来週|今度|今週|曜日|until|まで/.test(raw || '');
       return knownRatio(n) >= (isPlan ? 0.88 : 0.7);
     };
+    // 同じ文を1行の中で繰り返していたら1回にする
+    const uniqSentences = (s) => {
+      const parts = s.split(/(?<=[。！!？?])/);
+      const seen = [], out = [];
+      parts.forEach(pp => { const n = norm(pp); if (!n) return; if (seen.indexOf(n) === -1){ seen.push(n); out.push(pp); } });
+      return out.join('').trim();
+    };
     const lines = txt.split('\n')
-      .map(s => s.replace(/^[\s*・\-–—>#]+/, '').trim())
+      .flatMap(s => s.split(/(?=\d{4}[\/\-.]\d{1,2}[\/\-.]\d{1,2}\s)/))   // 1行に日付が2つ＝2件に分ける
+      .map(s => uniqSentences(s.replace(/^[\s*・\-–—>#]+/, '').trim()))
       .filter(s => {
         if (!s || /^なし[。.]?$/.test(s)) return false;
         if (s.length > 120) return false;                        // 長い＝説明文や思考メモ
@@ -2171,6 +2188,7 @@
       .filter(s => { const n = norm(s); return n.length > 3 && !isDup(n, s); })
       .map(s => /^\d{4}[\/\-.]\d{1,2}[\/\-.]\d{1,2}/.test(s) ? s : (dateStr + ' ' + s))
       .filter(s => !/^\d{4}[\/\-.]\d{1,2}[\/\-.]\d{1,2}\s*(明日|今日|今夜|今晩|今から|これから|さっき)[^。]{0,20}こと(に|を)(した|決めた|決める)/.test(s))
+      .filter((s, i, arr) => arr.findIndex(x => norm(x) === norm(s)) === i)   // 同じ内容は1つだけ
       .slice(0, 2);
     if (!lines.length) return;
     const block = lines.join('\n');
@@ -2687,6 +2705,151 @@
     const d = new Date();
     a.download = '会話_' + (t ? t.name : '') + '_' + d.getFullYear() +
       ('0' + (d.getMonth()+1)).slice(-2) + ('0' + d.getDate()).slice(-2) + '.txt';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  });
+
+  /* ---------- ChatGPT sync pack ----------
+     必要な項目だけを明示的に読み出して組み立てる（localStorage全体は読まない）。
+     APIキー・画像(Base64)・モデル設定・トークン/料金・天気位置・内部メッセージは一切扱わない。
+     通信なし・API料金なし・保存データは変更しない。 */
+  function buildSyncPack(){
+    const pad = n => ('0' + n).slice(-2);
+    const now = new Date();
+    const stamp = now.getFullYear() + '/' + pad(now.getMonth()+1) + '/' + pad(now.getDate()) + ' ' + pad(now.getHours()) + ':' + pad(now.getMinutes());
+    const fileStamp = now.getFullYear() + pad(now.getMonth()+1) + pad(now.getDate()) + '_' + pad(now.getHours()) + pad(now.getMinutes());
+    const tsText = ts => {
+      if (!ts) return '';
+      const d = new Date(ts);
+      return d.getFullYear() + '/' + pad(d.getMonth()+1) + '/' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+    };
+    const val = (s) => (s && String(s).trim()) ? String(s).trim() : '';
+    const orNone = (s) => val(s) || '（未登録）';
+
+    // ここで読むのは下の項目だけ（APIキー類は読まない）
+    const cname  = val(get(LS.name,'')) || '（未登録）';
+    const sysP   = val(get(LS.sys, DEFAULT_SYS));
+    const uname  = val(get(LS.uname,''));
+    const uintro = val(get(LS.uintro,''));
+    const unow   = val(get(LS.unow,''));
+    const anniv  = val(get(LS.anniv,''));
+    const mem    = val(get(LS.mem,''));
+    const amem   = val(get(LS.amem,''));
+    const look   = get(LS.imgLook,'');            // 見た目メモは整形せずそのまま
+    const world  = get(LS.world,'app') === 'together' ? '🏠 一緒にいるモード（同じ家で直接話している）' : '📱 メッセージモード（離れてスマホでやりとり）';
+    const curT   = (threads || []).find(t => t.id === curId) || null;
+    const roomMode = curT ? (curT.rp ? '📓 物語モード（現実の時刻に縛られない）' : '🕰 通常モード（現実の時刻の中で暮らしている）') : '（不明）';
+    const me = uname || '私';
+
+    // 通常の会話だけを取り出す（内部メッセージは除外）
+    const plain = (list) => (list || []).filter(m =>
+      m && !m.hidden && !m.diary && !m.imgp && typeof m.text === 'string' && m.text.trim());
+    const fmtMsgs = (list) => list.map(m => {
+      const who = m.role === 'model' ? cname : me;
+      const tm = m.ts ? '[' + tsText(m.ts) + '] ' : '';
+      return '**' + tm + who + '**\n' + m.text.trim();
+    }).join('\n\n');
+
+    const L = [];
+    L.push('# ChatGPT同期パック');
+    L.push('');
+    L.push('## このファイルの扱い方');
+    L.push('- このファイルは、書き出し日時時点での最新のキャラクター設定と、ふたりの共有記憶です。');
+    L.push('- 以前の資料と内容が食い違う場合は、日付の新しい情報を優先してください。');
+    L.push('- 記憶の内容を会話中に一覧として読み上げたりせず、必要な時だけ自然に反映してください。');
+    L.push('- 画像を生成するときは「画像生成用の見た目と画風」を、登場人物の外見と画風の基準として使ってください。');
+    L.push('');
+    L.push('- 同期パックのバージョン: 1');
+    L.push('- 書き出し日時: ' + stamp);
+    L.push('');
+    L.push('## 基本情報');
+    L.push('- キャラクター名: ' + cname);
+    L.push('- ユーザー名: ' + orNone(uname));
+    L.push('- 会話の世界観: ' + world);
+    L.push('- いまの部屋のモード: ' + roomMode);
+    L.push('');
+    L.push('## キャラクター設定');
+    L.push(orNone(sysP));
+    L.push('');
+    L.push('## ユーザーについて');
+    L.push(orNone(uintro));
+    L.push('');
+    L.push('## 現在の状況');
+    L.push(orNone(unow));
+    L.push('');
+    L.push('## 記念日');
+    L.push(orNone(anniv));
+    L.push('');
+    L.push('## 大切な思い出');
+    L.push(orNone(mem));
+    L.push('');
+    L.push('## 日々の会話から覚えたこと');
+    L.push(orNone(amem));
+    L.push('');
+    L.push('## 画像生成用の見た目と画風');
+    L.push(look && look.trim() ? look : '（未登録）');
+    L.push('');
+    L.push('## 最近の会話');
+
+    let anyConv = false;
+    // いまの部屋（独立設定なら含めない）
+    if (curT && !curT.solo){
+      const cur = plain(history).slice(-24);
+      if (cur.length){
+        anyConv = true;
+        L.push('');
+        L.push('### 💬 ' + curT.name + '（いまの部屋）');
+        L.push('');
+        L.push(fmtMsgs(cur));
+      }
+    } else if (curT && curT.solo){
+      L.push('');
+      L.push('（いまの部屋は🔒独立設定のため含めていません）');
+    }
+    // ほかの部屋：独立設定でない部屋のうち、更新が新しい3部屋まで
+    const others = (threads || [])
+      .filter(t => t && t.id !== curId && !t.solo)
+      .map(t => ({ t: t, last: lastTsOf(t.id) || 0 }))
+      .sort((a, b) => b.last - a.last)
+      .slice(0, 3);
+    others.forEach(o => {
+      let h = [];
+      try { h = JSON.parse(localStorage.getItem(histKey(o.t.id)) || '[]'); } catch(e){ h = []; }
+      const list = plain(h).slice(-8);
+      if (!list.length) return;
+      anyConv = true;
+      L.push('');
+      L.push('### 💬 ' + o.t.name);
+      L.push('');
+      L.push(fmtMsgs(list));
+    });
+    if (!anyConv) { L.push(''); L.push('（共有できる会話はまだありません）'); }
+    L.push('');
+
+    const safeName = (cname === '（未登録）' ? 'キャラクター' : cname).replace(/[\\\/:*?"<>|\s]/g, '_');
+    return { text: L.join('\n'), filename: safeName + '_ChatGPT同期_' + fileStamp + '.md' };
+  }
+
+  document.getElementById('syncPackBtn').addEventListener('click', async () => {
+    let pack;
+    try { pack = buildSyncPack(); }
+    catch(e){ alert('同期パックを作れなかった…（' + e.message + '）'); return; }
+    const blob = new Blob([pack.text], { type: 'text/markdown;charset=utf-8' });
+    // iPhoneでは共有シート（「ファイルに保存」）を優先、使えなければ通常のダウンロード
+    try {
+      const file = new File([blob], pack.filename, { type: 'text/markdown' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })){
+        await navigator.share({ files: [file], title: pack.filename });
+        return;
+      }
+    } catch(e){
+      if (e && e.name === 'AbortError') return;   // 共有シートを閉じただけ
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = pack.filename;
     document.body.appendChild(a);
     a.click();
     a.remove();
