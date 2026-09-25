@@ -1125,21 +1125,43 @@
   }
 
   // 思い出ノートが長くなったら、直近ぶん＋いまの話題に関係する行だけを渡す
+  // 検索に使う語：カタカナ・漢字・英数字を含む2〜3文字の組だけ（「って」「した」等のひらがなは無視）
+  // マークダウンの太字・見出し記号を取り除く（中身の文字は残す）
+  function stripMd(t){
+    return (t || '')
+      .replace(/\*\*([^*\n]+?)\*\*/g, '$1')
+      .replace(/__([^_\n]+?)__/g, '$1')
+      .replace(/^#{1,6}\s+/gm, '')
+      .replace(/\*\*/g, '');
+  }
+
+  function contentGrams(q){
+    q = (q || '').replace(/\s/g, '');
+    const out = [];
+    for (let n = 2; n <= 3; n++){
+      for (let i = 0; i + n <= q.length; i++){
+        const g = q.slice(i, i + n);
+        if (!/[ァ-ヶー一-龯A-Za-z0-9]/.test(g)) continue;
+        if (/^ー+$/.test(g)) continue;
+        if (out.indexOf(g) === -1) out.push(g);
+      }
+    }
+    return out;
+  }
+  function relScore(grams, text){
+    const t = (text || '').replace(/\s/g, '');
+    let s = 0;
+    grams.forEach(g => { if (t.indexOf(g) !== -1) s += (g.length >= 3 ? 2 : 1); });
+    return s;
+  }
+
   function pickMemory(mem, query){
     const lines = mem.split('\n').map(s => s.trim()).filter(Boolean);
     if (lines.length <= 25 || mem.length <= 1200) return mem;  // 短いうちは全部渡す
     const recent = lines.slice(-12);
     const older = lines.slice(0, -12);
-    const q = (query || '').replace(/\s/g, '');
-    const grams = [];
-    for (let n = 2; n <= 3; n++){
-      for (let i = 0; i + n <= q.length; i++) grams.push(q.slice(i, i + n));
-    }
-    const scored = older.map(l => {
-      let s = 0;
-      grams.forEach(g => { if (l.indexOf(g) !== -1) s++; });
-      return { l: l, s: s };
-    }).filter(x => x.s >= 2);
+    const grams = contentGrams(query);
+    const scored = older.map(l => ({ l: l, s: relScore(grams, l) })).filter(x => x.s >= 3);
     scored.sort((a, b) => b.s - a.s);
     const hits = scored.slice(0, 6).map(x => x.l);
     return older.filter(l => hits.indexOf(l) !== -1).concat(recent).join('\n');
@@ -1149,35 +1171,57 @@
   function crossRoomContext(){
     const th = parseInt(get(LS.xroom,'4'), 10);
     if (!th) return '';
+    const need = th * 2;                    // 控えめ=8点以上 / しっかり=4点以上
     const cur = curThread();
-    if (cur && cur.solo) return '';         // 「この部屋は独立」に設定された部屋では呼び水を出さない
-    const q = (lastUserText() || '').replace(/\s/g, '');
-    if (q.length < 6) return '';
-    const grams = [];
-    for (let n = 2; n <= 3; n++){
-      for (let i = 0; i + n <= q.length; i++) grams.push(q.slice(i, i + n));
-    }
+    const q = lastUserText() || '';
+    if (q.replace(/\s/g, '').length < 6) return '';
+    const grams = contentGrams(q);
+    if (!grams.length) return '';
+    const who = m => (m.role === 'model' ? get(LS.name,'碧') : (get(LS.uname,'') || '私'));
     const hits = [];
-    threads.forEach(t => {
-      if (t.id === curId) return;           // 今の部屋は履歴で見えているので除外
-      if (t.solo) return;                   // 「独立」の部屋は他の部屋に持ち出さない
-      let h = [];
-      try { h = JSON.parse(localStorage.getItem(histKey(t.id)) || '[]'); } catch(e){ return; }
-      h.forEach(m => {
-        if (m.hidden || m.diary) return;
-        const tx = (m.text || '');
-        const flat = tx.replace(/\s/g, '');
-        if (flat.length < 8) return;
-        let s = 0;
-        grams.forEach(g => { if (flat.indexOf(g) !== -1) s++; });
-        if (s >= th) hits.push({ s: s, room: t.name, who: (m.role === 'model' ? get(LS.name,'碧') : (get(LS.uname,'') || '私')), text: tx, ts: m.ts || 0 });
+    // 見つけたメッセージと、その直後の返事をセットで拾えるよう、位置も覚えておく
+    // limitBack：後ろから何通ぶんは「すでに見えている」ので拾わない（直後の返事としては使える）
+    const scan = (list, srcId, limitBack) => {
+      const clean = list.filter(m => m && !m.hidden && !m.diary && !m.imgp && (m.text || '').trim());
+      const maxI = clean.length - (limitBack || 0);
+      clean.forEach((m, i) => {
+        if (i >= maxI) return;
+        const tx = m.text;
+        if (tx.replace(/\s/g, '').length < 8) return;
+        const s = relScore(grams, tx);
+        if (s >= need) hits.push({ s: s, src: srcId, arr: clean, i: i, ts: m.ts || 0 });
       });
-    });
+    };
+    // 今の部屋の「⏳深さより前」の古い会話（履歴では見えていない部分）
+    // 今の部屋：⏳深さの外に流れた古い会話だけを探す（今送ったメッセージや見えている会話は拾わない）
+    scan(history, 'here', histDepth());
+    // ほかの部屋（独立の部屋にいる時・独立の部屋の中身は使わない）
+    if (!(cur && cur.solo)){
+      threads.forEach(t => {
+        if (t.id === curId || t.solo) return;
+        let h = [];
+        try { h = JSON.parse(localStorage.getItem(histKey(t.id)) || '[]'); } catch(e){ return; }
+        scan(h, t.id);
+      });
+    }
     if (!hits.length) return '';
     hits.sort((a, b) => (b.s - a.s) || (b.ts - a.ts));
-    return hits.slice(0, 3).map(h =>
-      h.who + '：' + (h.text.length > 90 ? h.text.slice(0, 90) + '…' : h.text)
-    ).join('\n');
+    // 見つけた会話＋その直後の返事を1セットにして、最大3セット
+    const used = {};
+    const sets = [];
+    for (let k = 0; k < hits.length && sets.length < 3; k++){
+      const hh = hits[k];
+      if (used[hh.src + '#' + hh.i]) continue;
+      const lines = [];
+      [hh.i, hh.i + 1].forEach(j => {
+        const m = hh.arr[j];
+        if (!m) return;
+        used[hh.src + '#' + j] = true;
+        lines.push(who(m) + '：' + (m.text.length > 140 ? m.text.slice(0, 140) + '…' : m.text));
+      });
+      sets.push(lines.join('\n'));
+    }
+    return sets.join('\n―――\n');
   }
 
   function fullSystemPrompt(){
@@ -1200,6 +1244,8 @@
     if (xr){
       out += '\n\n【以前ふたりで交わした、いまの話に関係しそうなやりとり（あなたが当然覚えていること。参考にして自然に活かすだけでよく、わざわざ引用したり「前に話したよね」と確認したりしない）】\n' + xr;
     }
+    out += '\n\n【記憶についての約束（厳守）】過去のことを聞かれた時は、ここまでに書かれている情報と会話履歴にあることだけを根拠にする。見つからないこと・はっきり覚えていないことを、覚えているふりをして作り話で埋めない。思い出せない時は「ごめん、そこちょっと曖昧かも。どんなだったっけ？」のように、キャラクターらしく正直に聞き返すこと。';
+    out += '\n\n【書式】**太字**・見出し・箇条書き記号などのマークダウン記法は使わない。普通の文章と絵文字だけで書く。';
     const t = curThread();
     if (t && t.name !== '日常') out += '\n\n【いまの話題】この会話スレッドのテーマは「' + t.name + '」。';
     if (get(LS.world,'app') === 'together'){
@@ -1266,7 +1312,7 @@
       if (m.imgp){ addPromptBubble(m.text, false); return; }
       let el;
       if (m.diary) el = addDiaryBubble(m.text, false, m.label, m.ts);
-      else el = addBubble(m.role === 'model' ? 'ai' : 'user', m.text, false, m.ts);
+      else el = addBubble(m.role === 'model' ? 'ai' : 'user', m.role === 'model' ? stripMd(m.text) : m.text, false, m.ts);
       if (el) el.dataset.hidx = idx;
     });
     scrollBottom();
@@ -1706,6 +1752,7 @@
         m.replace(/[＝？＆／：．＋]/g, c =>
           ({'＝':'=','？':'?','＆':'&','／':'/','：':':','．':'.','＋':'+'}[c])));
       reply = reply.replace(/\n{3,}/g, '\n\n'); // 空行の連発は2行までに圧縮
+      reply = stripMd(reply);                      // **太字** などの記号を取り除く
     }
     if (reply) markModelUsed(model);
     if (reply && provider === 'gemini' && /gemma/i.test(model)) reply = stripLeak(reply);
