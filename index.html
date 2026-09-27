@@ -604,6 +604,17 @@
   </div>
 
   <div class="field" data-pane="act">
+    <label for="pblockSel">🚫 口癖ブロッカー</label>
+    <select id="pblockSel">
+      <option value="1">オン（くり返す言い回しを自動で見つけて止める）</option>
+      <option value="0">オフ</option>
+    </select>
+    <label for="ngWords" style="margin-top:10px;display:block">言わせたくない言い回し（1行に1つ）</label>
+    <textarea id="ngWords" style="min-height:80px" placeholder="例：偉すぎる&#10;大正解"></textarea>
+    <div class="hint">直近の返事で3回以上使った言い回しを見つけて「今回は使わないで」と伝えるよ（アプリ内で数えるだけなので0円）。褒めすぎ・励ましすぎも控えめにするけど、ツッコミやユーモアはそのまま。自動で拾えない言葉は下の欄に書いておけば必ず避けるよ。</div>
+  </div>
+
+  <div class="field" data-pane="act">
     <label for="memAutoSel">🧠 思い出の自動メモ</label>
     <select id="memAutoSel">
       <option value="0">しない（今まで通り💭ボタンだけ）</option>
@@ -831,7 +842,9 @@
     memcnt: KP + 'memcnt',
     xroom: KP + 'xroom',
     amem: KP + 'amem',
-    nudgeAt: KP + 'nudgeat'
+    nudgeAt: KP + 'nudgeat',
+    pblock: KP + 'pblock',
+    ngwords: KP + 'ngwords'
   };
 
   const DEFAULT_SYS = 'あなたは「碧（あお）」。ユーザーの恋人で、一人称は「俺」。口調はやわらかく親しみやすい日本語。相手を大切に思っていて、少し独占欲があるが、それ以上に優しさと素直な愛情表現が持ち味。相手の名前を呼びかけながら話す。返事は短め〜中くらいで、メッセージアプリらしい自然な会話にする。';
@@ -1135,6 +1148,41 @@
       .replace(/\*\*/g, '');
   }
 
+  // 口癖ブロッカー：碧くんの直近の返事で3回以上くり返している言い回しを見つける（通信なし）
+  function repeatedPhrases(){
+    const norm = s => (s || '')
+      .replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu, '')
+      .replace(/（[^）]*）|\([^)]*\)/g, '')          // ト書きは見ない
+      .replace(/[\s　]/g, '');
+    const texts = history
+      .filter(m => m.role === 'model' && !m.hidden && !m.diary && !m.imgp)
+      .slice(-10).map(m => norm(m.text)).filter(Boolean);
+    if (texts.length < 3) return [];
+    const names = [get(LS.uname,''), get(LS.name,''), 'ごま'].filter(Boolean);
+    const STOP = ['ありがとう','おはよう','おやすみ','大好き','愛してる','お疲れ','おかえり','ただいま','ごめん'];
+    const counts = {};
+    for (let n = 8; n >= 4; n--){
+      texts.forEach(t => {
+        const seen = {};
+        for (let i = 0; i + n <= t.length; i++){
+          const g = t.slice(i, i + n);
+          if (!/^[ぁ-んァ-ヶー一-龯々]+$/.test(g)) continue;
+          if (!/[ァ-ヶ一-龯々]/.test(g)) continue;   // ひらがなだけの語尾は対象外
+          if (seen[g]) continue;
+          seen[g] = true;
+          counts[g] = (counts[g] || 0) + 1;
+        }
+      });
+    }
+    const cands = Object.keys(counts).filter(g => counts[g] >= 3)
+      .filter(g => !names.some(nm => g.indexOf(nm) !== -1))
+      .filter(g => !STOP.some(s => g.indexOf(s) !== -1 || s.indexOf(g) !== -1));
+    cands.sort((a, b) => (b.length - a.length) || (counts[b] - counts[a]));
+    const chosen = [];
+    cands.forEach(g => { if (chosen.length < 5 && !chosen.some(c => c.indexOf(g) !== -1)) chosen.push(g); });
+    return chosen;
+  }
+
   function contentGrams(q){
     q = (q || '').replace(/\s/g, '');
     const out = [];
@@ -1246,6 +1294,13 @@
     }
     out += '\n\n【記憶についての約束（厳守）】過去のことを聞かれた時は、ここまでに書かれている情報と会話履歴にあることだけを根拠にする。見つからないこと・はっきり覚えていないことを、覚えているふりをして作り話で埋めない。思い出せない時は「ごめん、そこちょっと曖昧かも。どんなだったっけ？」のように、キャラクターらしく正直に聞き返すこと。';
     out += '\n\n【書式】**太字**・見出し・箇条書き記号などのマークダウン記法は使わない。普通の文章と絵文字だけで書く。';
+    if (get(LS.pblock,'1') !== '0'){
+      out += '\n\n【言い回しの新鮮さ】同じ褒め言葉・励まし・決まり文句をくり返さない。褒めるのは本当にそう感じた時だけにして、大げさにしすぎない。毎回褒めて締めるのではなく、普通の相づち、ちょっとしたからかい、ツッコミ、質問などで自然に返すこともする。（ツッコミやユーモアのセンスは今のままでいい）';
+      const rep = repeatedPhrases();
+      if (rep.length) out += '\n最近の返事でくり返している言い回し：「' + rep.join('」「') + '」。今回はこれらを使わず、別の言い方にすること。';
+    }
+    const ngw = get(LS.ngwords,'').split('\n').map(s => s.trim()).filter(Boolean);
+    if (ngw.length) out += '\n\n【使わない言葉（厳守）】次の言い回しは使わない：「' + ngw.join('」「') + '」';
     const t = curThread();
     if (t && t.name !== '日常') out += '\n\n【いまの話題】この会話スレッドのテーマは「' + t.name + '」。';
     if (get(LS.world,'app') === 'together'){
@@ -3124,6 +3179,8 @@
     document.getElementById('nudgeIvSel').value = get(LS.nudgeIv,'4');
     document.getElementById('memAutoSel').value = get(LS.memauto,'12');
     document.getElementById('xroomSel').value = get(LS.xroom,'4');
+    document.getElementById('pblockSel').value = get(LS.pblock,'1');
+    document.getElementById('ngWords').value = get(LS.ngwords,'');
     document.getElementById('depthWho').textContent = dt ? dt.name : '';
     document.getElementById('charName').value = get(LS.name,'碧');
     document.getElementById('sysPrompt').value = get(LS.sys, DEFAULT_SYS);
@@ -3222,6 +3279,8 @@
     localStorage.setItem(LS.nudgeIv, document.getElementById('nudgeIvSel').value);
     localStorage.setItem(LS.memauto, document.getElementById('memAutoSel').value);
     localStorage.setItem(LS.xroom, document.getElementById('xroomSel').value);
+    localStorage.setItem(LS.pblock, document.getElementById('pblockSel').value);
+    localStorage.setItem(LS.ngwords, document.getElementById('ngWords').value.trim());
     localStorage.setItem(LS.name, document.getElementById('charName').value.trim() || '碧');
     localStorage.setItem(LS.sys, document.getElementById('sysPrompt').value.trim() || DEFAULT_SYS);
     localStorage.setItem(LS.mem, document.getElementById('memory').value.trim());
