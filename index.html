@@ -41,7 +41,8 @@
   }
   *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
   html,body{height:100%;overscroll-behavior:none}
-  html{background:var(--bg2)}
+  html{background:rgba(14,23,32,1)}                 /* 画面最下部の帯を入力欄と同じ色に（iOS 27対策） */
+  html.light{background:rgba(250,245,238,1)}
   body{
     position:fixed;inset:0;width:100%;   /* 画面ごと上に逃げるのを防ぐ */
     font-family:"KaomojiGuard","Zen Maru Gothic","Hiragino Maru Gothic ProN",sans-serif;
@@ -2695,6 +2696,7 @@
       document.body.style.backgroundAttachment = '';
     }
     document.body.classList.toggle('light', flag0(LS.light));
+    document.documentElement.classList.toggle('light', document.body.classList.contains('light'));
   }
 
   function fileToDataUrl(file, maxDim, square, cb){
