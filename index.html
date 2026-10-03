@@ -264,6 +264,7 @@
     border-top:1px solid rgba(63,167,160,.18);
   }
   body.kb #composer{padding-bottom:8px}   /* キーボード表示中はホームバー分の余白はいらない */
+  body.iosbar #composer{padding-bottom:10px}   /* iOS 27の下のふたがある時も余白はいらない */
   #toolBtns{display:flex;flex:0 0 auto}
   #photoBtn,#attachBtn{
     flex:0 0 auto;
@@ -3861,7 +3862,11 @@
     b.classList.remove('kb');
     b.style.top = '0px';
     b.style.bottom = 'auto';
-    b.style.height = fullScreenH() + 'px';
+    // 本体はiPhoneが使わせてくれる高さぴったり（下の「ふた」には潜らない）
+    b.style.height = window.innerHeight + 'px';
+    // iOS 27：画面下に「ふた」がある時は、ふたがホームバーの場所を確保してくれるので余白を二重に取らない
+    const reserved = fullScreenH() - window.innerHeight;
+    b.classList.toggle('iosbar', reserved > 20);
     window.scrollTo(0, 0);
   }
   function fitToVisible(){
