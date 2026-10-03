@@ -263,6 +263,7 @@
     background:rgba(14,23,32,.9);
     border-top:1px solid rgba(63,167,160,.18);
   }
+  body.kb #composer{padding-bottom:8px}   /* キーボード表示中はホームバー分の余白はいらない */
   #toolBtns{display:flex;flex:0 0 auto}
   #photoBtn,#attachBtn{
     flex:0 0 auto;
@@ -3846,9 +3847,21 @@
   });
   /* ---------- キーボードが出た時に、見えている範囲へ画面を合わせる（iPhone対策） ---------- */
   let kbStickBottom = false;
+  // ホーム画面アプリの時は「画面そのものの高さ」を使う（iOS 27で下に帯ができる対策）
+  function fullScreenH(){
+    const standalone = (window.navigator.standalone === true) ||
+      (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+    if (!standalone) return window.innerHeight;
+    const portrait = window.innerHeight >= window.innerWidth;
+    const scr = portrait ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
+    return Math.max(window.innerHeight, scr);
+  }
   function resetFit(){
     const b = document.body;
-    b.style.top = ''; b.style.bottom = ''; b.style.height = '';
+    b.classList.remove('kb');
+    b.style.top = '0px';
+    b.style.bottom = 'auto';
+    b.style.height = fullScreenH() + 'px';
     window.scrollTo(0, 0);
   }
   function fitToVisible(){
@@ -3862,6 +3875,7 @@
       return;
     }
     const b = document.body;
+    b.classList.add('kb');
     b.style.top = vv.offsetTop + 'px';
     b.style.bottom = 'auto';
     b.style.height = vv.height + 'px';
@@ -3870,8 +3884,9 @@
   if (window.visualViewport){
     window.visualViewport.addEventListener('resize', fitToVisible);
     window.visualViewport.addEventListener('scroll', fitToVisible);
-    fitToVisible();
   }
+  resetFit();
+  window.addEventListener('resize', () => { if (!document.body.classList.contains('kb')) resetFit(); });
 
   inputEl.addEventListener('focus', () => {
     refreshCompact();
@@ -3882,8 +3897,12 @@
   });
   inputEl.addEventListener('blur', () => {
     kbStickBottom = false;
-    resetFit();                                         // まず即座に元へ戻す
-    [150, 400, 800].forEach(ms => setTimeout(fitToVisible, ms));
+    // すぐに戻すと、押したボタンが指の下から逃げてしまうので少し待つ
+    [300, 600, 1000].forEach(ms => setTimeout(fitToVisible, ms));
+  });
+  // 送信ボタンを押してもキーボードを閉じない（LINEと同じ）。入力欄から離れないのでボタンも動かない
+  sendBtn.addEventListener('mousedown', (e) => {
+    if (document.activeElement === inputEl) e.preventDefault();
   });
   // アプリに戻ってきた時・画面の向きが変わった時もリセット
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') fitToVisible(); });
