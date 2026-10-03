@@ -41,6 +41,7 @@
   }
   *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
   html,body{height:100%;overscroll-behavior:none}
+  html{background:var(--bg2)}
   body{
     position:fixed;inset:0;width:100%;   /* 画面ごと上に逃げるのを防ぐ */
     font-family:"KaomojiGuard","Zen Maru Gothic","Hiragino Maru Gothic ProN",sans-serif;
@@ -3843,9 +3844,21 @@
   });
   /* ---------- キーボードが出た時に、見えている範囲へ画面を合わせる（iPhone対策） ---------- */
   let kbStickBottom = false;
+  function resetFit(){
+    const b = document.body;
+    b.style.top = ''; b.style.bottom = ''; b.style.height = '';
+    window.scrollTo(0, 0);
+  }
   function fitToVisible(){
     const vv = window.visualViewport;
     if (!vv) return;
+    const ae = document.activeElement;
+    const typing = ae && /^(INPUT|TEXTAREA)$/.test(ae.tagName);
+    // 入力していない時・キーボードが出ていない時は、調整を外して元の固定レイアウトに戻す
+    if (!typing || vv.height > window.innerHeight - 60){
+      resetFit();
+      return;
+    }
     const b = document.body;
     b.style.top = vv.offsetTop + 'px';
     b.style.bottom = 'auto';
@@ -3867,8 +3880,12 @@
   });
   inputEl.addEventListener('blur', () => {
     kbStickBottom = false;
-    [0, 150, 400].forEach(ms => setTimeout(fitToVisible, ms));
+    resetFit();                                         // まず即座に元へ戻す
+    [150, 400, 800].forEach(ms => setTimeout(fitToVisible, ms));
   });
+  // アプリに戻ってきた時・画面の向きが変わった時もリセット
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') fitToVisible(); });
+  window.addEventListener('orientationchange', () => setTimeout(fitToVisible, 300));
   inputEl.addEventListener('blur', () => { toolsPinned = false; setTimeout(refreshCompact, 150); });
 
   inputEl.addEventListener('input', () => {
