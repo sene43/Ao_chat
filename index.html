@@ -3841,7 +3841,34 @@
     toolsPinned = true;
     refreshCompact();
   });
-  inputEl.addEventListener('focus', () => { refreshCompact(); });
+  /* ---------- キーボードが出た時に、見えている範囲へ画面を合わせる（iPhone対策） ---------- */
+  let kbStickBottom = false;
+  function fitToVisible(){
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const b = document.body;
+    b.style.top = vv.offsetTop + 'px';
+    b.style.bottom = 'auto';
+    b.style.height = vv.height + 'px';
+    if (kbStickBottom) chatEl.scrollTop = chatEl.scrollHeight;
+  }
+  if (window.visualViewport){
+    window.visualViewport.addEventListener('resize', fitToVisible);
+    window.visualViewport.addEventListener('scroll', fitToVisible);
+    fitToVisible();
+  }
+
+  inputEl.addEventListener('focus', () => {
+    refreshCompact();
+    // 最新付近を見ていたなら、キーボードが出たあとも最新が見えるようにする
+    kbStickBottom = (chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight) < 120;
+    // キーボードのアニメーション中・後に何度か合わせ直す（初回のずれ対策）
+    [0, 120, 300, 600].forEach(ms => setTimeout(fitToVisible, ms));
+  });
+  inputEl.addEventListener('blur', () => {
+    kbStickBottom = false;
+    [0, 150, 400].forEach(ms => setTimeout(fitToVisible, ms));
+  });
   inputEl.addEventListener('blur', () => { toolsPinned = false; setTimeout(refreshCompact, 150); });
 
   inputEl.addEventListener('input', () => {
