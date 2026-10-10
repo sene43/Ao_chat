@@ -1687,7 +1687,7 @@
     } catch(e){}
   }
 
-  // ---- 料金の概算（100万トークンあたりのUSD単価。2026年7月時点の目安） ----
+  // ---- 料金の概算（100万トークンあたりのUSD単価。Gemini 3.x Flashは2026年10月に公式ページで再確認） ----
   const JPY_RATE = 150; // 1ドル＝何円で換算するか（ここを書き換えれば調整できるよ）
   // 期間限定セールの終了日時（この時刻より前はセール価格で計算）
   const PROMO_UNTIL_2026 = new Date(2027, 0, 1).getTime();   // 2026/12/31まで半額 → 2027/1/1から正規料金
@@ -1711,19 +1711,27 @@
     [/gpt-5\.6.*luna|luna/i,     1.00, 6.00],
     [/gpt-5\.6.*terra|terra/i,   2.50, 15.0]
   ];
-  function estCostUSD(model, inTok, outTok){
+  // cachedTok：Geminiが自動で使い回した（キャッシュした）入力の量。この分は入力単価の1割で計算
+  function estCostUSD(model, inTok, outTok, cachedTok){
     for (let i = 0; i < MODEL_PRICES.length; i++){
       const e = MODEL_PRICES[i];
       if (e[0].test(model)){
         let pin = e[1], pout = e[2];
         if (e[3] && Date.now() < e[3].until){ pin = e[3].in; pout = e[3].out; }  // セール期間中は自動でセール価格
-        return (inTok * pin + outTok * pout) / 1000000;
+        const cached = Math.min(cachedTok || 0, inTok);
+        return ((inTok - cached) * pin + cached * pin * 0.1 + outTok * pout) / 1000000;
       }
     }
     return null; // 単価表にないモデルは料金不明（トークン数だけ数える）
   }
 
-  function addTokens(inTok, outTok, model){
+  // Geminiの使用量を記録。考える時間（thinking）も出力として課金されるので受信に含める
+  function addGeminiUsage(um, model){
+    if (!um) return;
+    addTokens(um.promptTokenCount, (um.candidatesTokenCount || 0) + (um.thoughtsTokenCount || 0), model, um.cachedContentTokenCount || 0);
+  }
+
+  function addTokens(inTok, outTok, model, cachedTok){
     try {
       const d = new Date();
       const today = d.getFullYear() + '-' + (d.getMonth()+1) + '-' + d.getDate();
@@ -1733,7 +1741,7 @@
       if (!s.c) s.c = 0;
       s.i += (inTok || 0);
       s.o += (outTok || 0);
-      const cost = estCostUSD(model || get(LS.model,''), inTok || 0, outTok || 0);
+      const cost = estCostUSD(model || get(LS.model,''), inTok || 0, outTok || 0, cachedTok || 0);
       if (cost) s.c += cost;
       localStorage.setItem(LS.tok, JSON.stringify(s));
     } catch(e){}
@@ -1910,7 +1918,7 @@
       // 使用トークンを記録（各社の返事に正確な数が入っている）
       try {
         if (provider === 'gemini' && data.usageMetadata){
-          addTokens(data.usageMetadata.promptTokenCount, data.usageMetadata.candidatesTokenCount, model);
+          addGeminiUsage(data.usageMetadata, model);
         } else if ((provider === 'openai' || provider === 'openrouter') && data.usage){
           addTokens(data.usage.prompt_tokens, data.usage.completion_tokens, model);
         } else if (provider === 'anthropic' && data.usage){
@@ -2256,7 +2264,7 @@
     const data = await res.json();
     let raw = '';
     try { raw = data.candidates[0].content.parts.map(pp => pp.text || '').join(''); } catch(e){}
-    try { if (data.usageMetadata) addTokens(data.usageMetadata.promptTokenCount, data.usageMetadata.candidatesTokenCount, model); } catch(e){}
+    try { if (data.usageMetadata) addGeminiUsage(data.usageMetadata, model); } catch(e){}
     let blocked = false;
     try {
       const fr = data.candidates && data.candidates[0] && data.candidates[0].finishReason;
@@ -2393,7 +2401,7 @@
       const data = await res.json();
       if (!res.ok) return;
       try { txt = data.candidates[0].content.parts.map(pp => pp.text || '').join(''); } catch(e){ return; }
-      try { if (data.usageMetadata) addTokens(data.usageMetadata.promptTokenCount, data.usageMetadata.candidatesTokenCount, 'gemma-4-31b-it'); } catch(e){}
+      try { if (data.usageMetadata) addGeminiUsage(data.usageMetadata, 'gemma-4-31b-it'); } catch(e){}
     } catch(e){ return; }
     if (!txt) return;
     // まずGemmaの思考漏れを掃除してから、思い出らしい行だけを厳しく選ぶ
@@ -4226,7 +4234,7 @@
   }
 
   // ネタにする最近の会話（📓物語モード・🔒独立の部屋は使わない）
-  function snsRecentConv(){
+  function snsRecentConv(maxLines){
     const cname = snsCname(), uname = snsUname();
     const since = Date.now() - 36 * 3600 * 1000;
     let all = [];
@@ -4242,7 +4250,7 @@
       });
     });
     all.sort((a, b) => (a.ts || 0) - (b.ts || 0));
-    return all.slice(-16).map(m =>
+    return all.slice(-(maxLines || 16)).map(m =>
       (m.role === 'model' ? cname : uname) + '：' + (m.text.length > 120 ? m.text.slice(0, 120) + '…' : m.text)
     ).join('\n');
   }
@@ -4253,7 +4261,24 @@
     ).join('\n');
   }
 
-  function snsSystem(query){
+  // 頭の中メモから、新しい方を数行＋古い方からランダムに数行（毎回ちがう思い出がネタになる）
+  function snsSampleLines(text, recentN, randomN){
+    const lines = (text || '').split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length <= recentN + randomN) return lines.join('\n');
+    const recent = lines.slice(-recentN);
+    const older = lines.slice(0, -recentN);
+    const picked = [];
+    while (picked.length < randomN && older.length){
+      picked.push(older.splice(Math.floor(Math.random() * older.length), 1)[0]);
+    }
+    // 元の並び（古い順）に戻してから渡す
+    const order = (text || '').split('\n').map(l => l.trim());
+    picked.sort((a, b) => order.indexOf(a) - order.indexOf(b));
+    return picked.concat(recent).join('\n');
+  }
+
+  // light=true はつぶやき用（資料を軽くしてAPI代を節約）
+  function snsSystem(query, light){
     const cname = snsCname(), uname = snsUname();
     let out = get(LS.sys,'') || DEFAULT_SYS;
     const ui = get(LS.uintro,'').trim();
@@ -4263,7 +4288,7 @@
     const mem = get(LS.mem,'').trim();
     if (mem) out += '\n\n【これまでのふたりの思い出・大切な記憶】\n' + pickMemory(mem, query || '');
     const amem = get(LS.amem,'').trim();
-    if (amem) out += '\n\n【あなたが日々の会話で自然に覚えたこと】\n' + pickMemory(amem, query || '');
+    if (amem) out += '\n\n【あなたが日々の会話で自然に覚えたこと】\n' + (light ? snsSampleLines(amem, 6, 6) : pickMemory(amem, query || ''));
     const fol = snsFollowers();
     out += '\n\n【いまのあなた：SNS】あなた（' + cname + '）は自分のSNSアカウントに投稿したり、リプライに返事をしたりしている。鍵付きの小さなアカウントで、フォロワーは' + uname + 'と、' +
       (fol.length ? '次の知り合いだけ：' + fol.map(snsFolDesc).join('、') : 'ごく親しい知り合い数人だけ') + '。';
@@ -4283,7 +4308,7 @@
   }
 
   // 1回きりの呼び出し（会話履歴は渡さない）。モデル名で各社に自動で振り分け
-  async function snsApi(sys, userText, img){
+  async function snsApi(sys, userText, img, thinkLow){
     const model = get(LS.model,'') || 'gemini-2.5-flash';
     const provider = providerOf(model);
     let url, headers, body, extract;
@@ -4316,6 +4341,8 @@
       body = { system_instruction: { parts: [{ text: sys }] }, contents: [{ role:'user', parts: parts }] };
       const ss = safetySettings();
       if (ss && !/gemma/i.test(model)) body.safetySettings = ss;
+      // 短いつぶやきは深く考えなくていいので「low」に（Gemini 3系のみ。初期設定はmedium）
+      if (thinkLow && /gemini-3/i.test(model)) body.generationConfig = { thinkingConfig: { thinkingLevel: 'low' } };
       url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(key);
       headers = { 'Content-Type':'application/json' };
       extract = d => { try { return d.candidates[0].content.parts.map(pp => pp.text || '').join(''); } catch(e){ return ''; } };
@@ -4341,10 +4368,18 @@
 
     let data, raw = '';
     try {
-      data = await tryCall(url, headers, body);
+      try {
+        data = await tryCall(url, headers, body);
+      } catch(e0){
+        // 「low」を受け付けないモデルだった時は、いつもの設定でもう一度
+        if (body && body.generationConfig && /thinking|level|generation_?config|invalid/i.test(e0.message)){
+          delete body.generationConfig;
+          data = await tryCall(url, headers, body);
+        } else throw e0;
+      }
       raw = extract(data) || '';
       try {
-        if (provider === 'gemini' && data.usageMetadata) addTokens(data.usageMetadata.promptTokenCount, data.usageMetadata.candidatesTokenCount, model);
+        if (provider === 'gemini' && data.usageMetadata) addGeminiUsage(data.usageMetadata, model);
         else if ((provider === 'openai' || provider === 'openrouter') && data.usage) addTokens(data.usage.prompt_tokens, data.usage.completion_tokens, model);
         else if (provider === 'anthropic' && data.usage) addTokens(data.usage.input_tokens, data.usage.output_tokens, model);
       } catch(e){}
@@ -4440,6 +4475,18 @@
   }
 
   // 彼の投稿を1件作る（manual=🎲ボタンから / slotStart=自動投稿の時間帯の始まり）
+  // チャットの返事みたいな投稿かどうか（名前で呼びかける・「お前」「君」で話しかける・相づちで始まる）
+  function snsLooksLikeReply(t){
+    const s = (t || '').trim();
+    if (!s) return false;
+    const un = get(LS.uname,'').trim();
+    if (un && un.length >= 2 && s.indexOf(un) !== -1) return true;
+    if (/(お前|おまえ)(?!ら|たち|達)/.test(s)) return true;
+    if (/(^|[、。！？!?\s「])(君|きみ|あんた)(は|が|も|の|に|を|と|って|、)/.test(s)) return true;
+    if (/^(うん|うんうん|そうだな|そうだね|そっか|そうか|わかった|分かった|了解|りょうかい|ありがとう|ありがと|おかえり)[、。！!〜…\s]/.test(s)) return true;
+    return false;
+  }
+
   async function snsGeneratePost(manual, slotStart){
     if (snsBusy) return false;
     if (activeKeyMissing()){
@@ -4450,8 +4497,8 @@
     snsSetNote('✍️ ' + snsCname() + 'がつぶやきを考え中…');
     try {
       const uname = snsUname();
-      const conv = snsRecentConv();
-      const recent = snsRecentPostsText(6);
+      const conv = snsRecentConv(6);              // つぶやきは直近の様子が分かれば十分
+      const recent = snsRecentPostsText(4);
       const fol = snsFollowers();
       const h = new Date().getHours();
       const band = (h >= 5 && h < 11) ? '朝' : (h >= 11 && h < 17) ? '昼' : (h >= 17 && h < 23) ? '夜' : '深夜';
@@ -4461,29 +4508,53 @@
         theme = '近づいている記念日にちなんだ投稿（' + ann + '）';
       } else {
         const r = Math.random();
-        theme = r < 0.45 ? 'あなた自身の日常（仕事・趣味・食べたもの・天気・ふと思ったことなど）。' + uname + 'の話は出さなくてもいい'
-          : r < 0.8 ? uname + 'との暮らしや最近の会話をふまえた、さりげない惚気・匂わせ'
-          : uname + 'に向けたちょっとした一言（直接の呼びかけでも、本人にだけ伝わる書き方でもいい）';
+        theme = r < 0.5 ? uname + 'がそばにいない時間（仕事・外出中など）の、あなた自身の過ごし方。仕事・家のこと・趣味・食べたもの・天気・ふと思ったことなど、' + uname + 'が普段は見られないあなたの日常の一コマ'
+          : r < 0.85 ? '本人には直接言っていない（言えていない）本音や、最近ふと気づいた相手のいいところ・かわいいところ。名前は出さずに独り言として。重くなりすぎず、本人が読んだらキュンとするくらいの温度で'
+          : '最近の暮らしや出来事をふまえた、さりげない惚気・匂わせ（フォロワーに向けた書き方で）';
       }
       let wx = '';
       if (flag0(LS.weather)) { try { wx = await weatherContext(); } catch(e){} }
-      let p = 'いまは' + nowStr() + '（' + band + '）。\n';
-      if (wx) p += wx.replace('ユーザーの現地の天気', 'いまの天気') + '\n';
-      p += '\n【最近のふたりの会話（参考。引用・要約はしない）】\n' + (conv || '（ここ1日半はあまり話していない）') + '\n';
-      if (recent) p += '\n【タイムラインの最近の投稿（同じ話題・同じ言い回しをくり返さない）】\n' + recent + '\n';
-      p += '\n【今回の投稿のテーマ】' + theme + '\n';
-      p += '\nいまの時間帯にふさわしい、あなたのSNS投稿を1つ書いて。40〜140字くらい。';
+
+      // 会話ログは「背景資料」としてシステム側に置く。依頼文の最後に祐佳里の発言が来ると、
+      // 彼がそれに返事をしてしまう（＝チャットの返信みたいな投稿になる）ため
+      let bg = '\n\n【背景資料（読んで把握するだけ。ここに書かれた発言に返事はしない）】';
+      bg += '\n◆最近のあなたと' + uname + 'の会話ログ（あなたが知っている出来事として参考にするだけ。引用・要約・返信はしない）\n' +
+        (conv || '（ここ1日半はあまり話していない）');
+      if (recent) bg += '\n◆タイムラインの最近の投稿（同じ話題・同じ言い回しをくり返さない）\n' + recent;
+      bg += '\n\n【今回の役割（最優先）】あなたはいま、ひとりでSNSに新しい投稿をしようとしている。これは' + uname + 'への返信ではない。' +
+        '\n・フォロワー全員に向けた独り言のつぶやきとして書く。' + uname + 'に話しかけたり、' + uname + 'の発言に答えたりしない（それはチャットでやること）。' +
+        '\n・投稿の中で' + uname + 'の名前は出さない。触れる時は名前を伏せた匂わせにする。';
+
+      const baseP = (extra) => {
+        let p = 'いまは' + nowStr() + '（' + band + '）。\n';
+        if (wx) p += wx.replace('ユーザーの現地の天気', 'いまの天気') + '\n';
+        p += '\n【今回の投稿のテーマ】' + theme + '\n';
+        p += '\nいまの時間帯にふさわしい、あなたのSNS投稿を1つ書いて。誰かへの返事ではなく、独り言のつぶやき。40〜140字くらい。';
+        if (extra) p += '\n' + extra;
+        return p;
+      };
       let pick = null;
+      let tail = '';
       if (fol.length && Math.random() < 0.6){
         pick = fol[Math.floor(Math.random() * fol.length)];
-        p += '\nさらに、フォロワーの「' + snsFolDesc(pick) + '」がこの投稿に付けたコメントを1つ、その人らしい口調で短く（40字以内）書いて。';
+        tail += '\nさらに、フォロワーの「' + snsFolDesc(pick) + '」がこの投稿に付けたコメントを1つ、その人らしい口調で短く（40字以内）書いて。';
       }
-      p += '\n\n【出力形式（厳守）】\n投稿：（投稿の本文）' + (pick ? '\nコメント（' + pick.name + '）：（コメントの本文）' : '') +
+      tail += '\n\n【出力形式（厳守）】\n投稿：（投稿の本文）' + (pick ? '\nコメント（' + pick.name + '）：（コメントの本文）' : '') +
         '\nこの形式の行だけを出力し、前置きや説明は書かない。';
 
-      const raw = await snsApi(snsSystem(conv), p, null);
-      const parsed = snsParse(raw);
+      const sys = snsSystem(conv, true) + bg;
+      let raw = await snsApi(sys, baseP('') + tail, null, true);
+      let parsed = snsParse(raw);
       if (!parsed.main) throw new Error('投稿が空だったよ');
+      // それでも返事っぽくなった時だけ、1回だけ書き直してもらう
+      if (snsLooksLikeReply(parsed.main)){
+        try {
+          const raw2 = await snsApi(sys, baseP('（前の案「' + parsed.main.slice(0, 60) + '」は' + uname +
+            'への返事になっていたのでボツ。話しかけず、名前も出さず、ひとりごとのつぶやきとして別の内容を書くこと）') + tail, null, true);
+          const p2 = snsParse(raw2);
+          if (p2.main) parsed = p2;
+        } catch(e){}
+      }
 
       const posts = snsLoad();
       const now = Date.now();
