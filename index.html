@@ -4166,7 +4166,12 @@
   function snsLoad(){
     try {
       const a = JSON.parse(get(LS.snsPosts,'[]'));
-      return Array.isArray(a) ? a.filter(p => p && p.id) : [];
+      if (!Array.isArray(a)) return [];
+      return a.filter(p => p && p.id).map(p => {
+        if (p.who !== 'user' && p.text) p.text = snsCleanText(p.text);
+        (p.replies || []).forEach(r => { if (r && r.who !== 'user' && r.text) r.text = snsCleanText(r.text); });
+        return p;
+      });
     } catch(e){ return []; }
   }
   function snsSave(posts){
@@ -4254,12 +4259,39 @@
       (m.role === 'model' ? cname : uname) + '：' + (m.text.length > 120 ? m.text.slice(0, 120) + '…' : m.text)
     ).join('\n');
   }
-  function snsRecentPostsText(n){
+  function snsRecentPostsText(n, maxLen){
     const cname = snsCname(), uname = snsUname();
-    return snsLoad().slice(0, n).map(p =>
-      (p.who === 'char' ? cname : uname) + '（' + relTime(p.ts) + '）：' + (p.text || '').slice(0, 100) + (p.img || p.imgGone ? '［写真付き］' : '')
-    ).join('\n');
+    const L = maxLen || 100;
+    return snsLoad().slice(0, n).map(p => {
+      const t = (p.text || '').replace(/\s+/g, ' ');
+      return (p.who === 'char' ? cname : uname) + '（' + relTime(p.ts) + '）：' + (t.length > L ? t.slice(0, L) + '…' : t) + (p.img || p.imgGone ? '［写真付き］' : '');
+    }).join('\n');
   }
+
+  // つぶやきの「ネタの種」。毎回ちがう切り口を1つ引いて、同じような投稿が続かないようにする
+  const SNS_SEEDS_DAILY = [
+    '今日食べたもの・作ったもの（具体的なメニュー名や味の感想）',
+    '仕事や用事の最中にあった、小さな出来事やあるある',
+    '外で見かけたもの（季節の景色・変わった看板・動物・すれ違った人の様子など）',
+    '最近ハマっていること・気になっていること',
+    'ちょっとした失敗談・うっかりしたこと',
+    '買い物で迷ったもの・買ったもの・欲しくなったもの',
+    '昔のことをふと思い出したこと',
+    'いまの季節・時期ならではのこと（いまの月に合う話題）',
+    '読んだ・観た・聴いたもの（本・動画・音楽・テレビなど）の感想',
+    'どうでもいい考え事・くだらない疑問',
+    '天気や体調、部屋の中のちょっとした変化',
+    '自分の趣味や特技に関すること'
+  ];
+  const SNS_SEEDS_HEART = [
+    '相手の小さな癖や、気づいたら目で追っているところ',
+    '相手のためにこっそり計画していること（次に行きたい場所・サプライズ・買ってあげたいもの）',
+    '最近言いそびれた「ありがとう」や「好き」に近い気持ち',
+    '相手と過ごしてから変わった、自分の習慣や好み',
+    'ふたりの思い出の中から、ふと思い出したワンシーン',
+    '相手について、自分だけが知っていると思っていること'
+  ];
+  function snsPick(arr){ return arr[Math.floor(Math.random() * arr.length)]; }
 
   // 頭の中メモから、新しい方を数行＋古い方からランダムに数行（毎回ちがう思い出がネタになる）
   function snsSampleLines(text, recentN, randomN){
@@ -4295,6 +4327,7 @@
     out += '\n・キャラクターの口調・性格・一人称・世界観をそのまま保つ。';
     out += '\n・SNSに打ち込む文面だけを書く。（）のト書き・行動描写・ナレーション・説明は書かない。';
     out += '\n・絵文字はキャラクターらしい範囲で。ハッシュタグは使っても1つまで。マークダウン記法は使わない。';
+    out += '\n・URL・リンク（pic.twitter.com/〜 のような写真リンクも）や［画像］のような置き換え文字は書かない。このSNSは文章だけで、写真は添付できない。';
     out += '\n・ふたりの会話をそのまま引用したり、' + uname + 'が人に知られたくなさそうなことを書いたりしない。惚気や気持ちは「匂わせ」くらいの距離感で。';
     out += '\n・ここに名前の出ていない人物（ほかのキャラクター・有名人など）を、知り合いとして勝手に登場させない。';
     out += '\n・ふたりの過去の出来事に触れる時は、ここに書かれている情報と最近の会話にあることだけを根拠にし、作り話はしない。';
@@ -4437,7 +4470,7 @@
       else main += (main ? '\n' : '') + line;
     });
     const clean = s => {
-      s = (s || '').trim();
+      s = snsCleanText(s);
       // 全体が「」や""で1組だけ囲まれている時だけ外す
       if (/^「[^「」]*」$/.test(s)) s = s.slice(1, -1);
       else if (/^["“][^"“”]*["”]$/.test(s)) s = s.slice(1, -1);
@@ -4447,6 +4480,17 @@
       main: clean(main),
       comments: comments.map(c => ({ name: c.name, text: clean(c.text) })).filter(c => c.text)
     };
+  }
+
+  // 彼やフォロワーの文から、存在しないリンク（pic.twitter.com/xxx など）や［画像］の置き換え文字を取り除く
+  function snsCleanText(s){
+    return (s || '')
+      .replace(/https?:\/\/\S+/g, '')
+      .replace(/(?:pic\.twitter\.com|t\.co|x\.com|twitter\.com|instagram\.com|instagr\.am)\/\S*/gi, '')
+      .replace(/[［\[【(（]\s*(?:画像|写真|動画|photo|image|pic)[^］\]】)）]{0,10}[］\]】)）]/gi, '')
+      .replace(/[ \t　]+$/gm, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
   }
 
   // 登録されたフォロワーのコメントだけを受け付ける（知らない人は出さない）
@@ -4498,7 +4542,7 @@
     try {
       const uname = snsUname();
       const conv = snsRecentConv(6);              // つぶやきは直近の様子が分かれば十分
-      const recent = snsRecentPostsText(4);
+      const recent = snsRecentPostsText(12, 45);   // 話題かぶり防止用（短く切って12件）
       const fol = snsFollowers();
       const h = new Date().getHours();
       const band = (h >= 5 && h < 11) ? '朝' : (h >= 11 && h < 17) ? '昼' : (h >= 17 && h < 23) ? '夜' : '深夜';
@@ -4508,9 +4552,9 @@
         theme = '近づいている記念日にちなんだ投稿（' + ann + '）';
       } else {
         const r = Math.random();
-        theme = r < 0.5 ? uname + 'がそばにいない時間（仕事・外出中など）の、あなた自身の過ごし方。仕事・家のこと・趣味・食べたもの・天気・ふと思ったことなど、' + uname + 'が普段は見られないあなたの日常の一コマ'
-          : r < 0.85 ? '本人には直接言っていない（言えていない）本音や、最近ふと気づいた相手のいいところ・かわいいところ。名前は出さずに独り言として。重くなりすぎず、本人が読んだらキュンとするくらいの温度で'
-          : '最近の暮らしや出来事をふまえた、さりげない惚気・匂わせ（フォロワーに向けた書き方で）';
+        theme = r < 0.5 ? uname + 'がそばにいない時間の、あなた自身の日常の一コマ。今回の切り口：' + snsPick(SNS_SEEDS_DAILY) + '。' + uname + 'の話は出さなくてもいい'
+          : r < 0.85 ? '本人には直接言っていない本音を、名前は出さずに独り言として。今回の切り口：' + snsPick(SNS_SEEDS_HEART) + '。重くなりすぎず、本人が読んだらキュンとするくらいの温度で'
+          : '最近の暮らしや出来事をふまえた、さりげない惚気・匂わせ（フォロワーに向けた書き方で）。今回の切り口：' + snsPick(SNS_SEEDS_DAILY.concat(SNS_SEEDS_HEART));
       }
       let wx = '';
       if (flag0(LS.weather)) { try { wx = await weatherContext(); } catch(e){} }
@@ -4520,10 +4564,12 @@
       let bg = '\n\n【背景資料（読んで把握するだけ。ここに書かれた発言に返事はしない）】';
       bg += '\n◆最近のあなたと' + uname + 'の会話ログ（あなたが知っている出来事として参考にするだけ。引用・要約・返信はしない）\n' +
         (conv || '（ここ1日半はあまり話していない）');
-      if (recent) bg += '\n◆タイムラインの最近の投稿（同じ話題・同じ言い回しをくり返さない）\n' + recent;
+      if (recent) bg += '\n◆タイムラインの最近の投稿（ここにある話題・書き出し・締め方は使用済み。今回は別の話題・別の書き方にする）\n' + recent;
       bg += '\n\n【今回の役割（最優先）】あなたはいま、ひとりでSNSに新しい投稿をしようとしている。これは' + uname + 'への返信ではない。' +
         '\n・フォロワー全員に向けた独り言のつぶやきとして書く。' + uname + 'に話しかけたり、' + uname + 'の発言に答えたりしない（それはチャットでやること）。' +
-        '\n・投稿の中で' + uname + 'の名前は出さない。触れる時は名前を伏せた匂わせにする。';
+        '\n・投稿の中で' + uname + 'の名前は出さない。触れる時は名前を伏せた匂わせにする。' +
+        '\n・「今回の切り口」に沿って、具体的なもの（料理名・場所・物・数字・固有の出来事など）を1つ以上入れる。ぼんやりした感想だけで終わらせない。' +
+        '\n・毎回同じ締め方（「帰りを待ってる」「迎える準備をする」など）にしない。ペットや相棒の話も、切り口に関係ない時は無理に入れない。';
 
       const baseP = (extra) => {
         let p = 'いまは' + nowStr() + '（' + band + '）。\n';
