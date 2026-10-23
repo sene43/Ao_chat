@@ -752,7 +752,7 @@
       <option value="4">控えめ（関連が強い時だけ）</option>
       <option value="2">しっかり（多少ゆるくても拾う）</option>
     </select>
-    <div class="hint">送ったメッセージに関係する会話を、ほかの部屋からそっと探して最大3つだけ渡すよ。「部屋①で耳鼻科の話→部屋②でその続き」が通じるようになる。混ぜたくない部屋は💬リストの🔗を押して🔒（独立）にしてね。アプリ内で探すだけだからAPI代は増えないよ。</div>
+    <div class="hint">送ったメッセージ（とその直前の流れ）に関係する会話を、ほかの部屋や⏳より昔の会話からそっと探して、その場面の「その後」（答え・オチ）まで最大3場面渡すよ。「部屋①で耳鼻科の話→部屋②でその続き」が通じるようになる。混ぜたくない部屋は💬リストの🔗を押して🔒（独立）にしてね。アプリ内で探すだけだからAPI代は増えないよ。</div>
   </div>
 
   <div class="field" data-pane="act">
@@ -820,7 +820,7 @@
   </div>
 
   <div class="field" data-pane="you">
-    <label for="autoMem">🧠 頭の中（自動でたまるメモ）</label>
+    <label for="autoMem">🧠 頭の中（自動でたまるメモ）<span id="amemCount" style="float:right;font-weight:400;font-size:12px;color:var(--ink-dim)"></span></label>
     <textarea id="autoMem" style="min-height:110px" placeholder="会話から自動でたまっていくよ"></textarea>
     <button type="button" class="btn line" id="autoMemClear" style="margin-top:8px;padding:9px;font-size:13px">🧹 頭の中を空にする</button>
     <div class="hint">🔔ふるまいの「思い出の自動メモ」でたまる欄。思い出ノート（あなたが選んで残す大切な記憶）とは別で、日々の会話から自然に覚えたことが積もっていくよ。編集・削除も自由。300行を超えると古いものから消えるよ。</div>
@@ -1357,19 +1357,45 @@
   }
 
   // 他の部屋の会話から、いまの話題に関係するやりとりを少しだけ拾う（控えめ）
+  // v2：①「覚えてないの？」みたいな短い追いかけ質問でも、直前の流れ（自分の前の発言・相手の返事）から話題を拾う
+  //     ②見つけた場面の「その後」を3通まで一緒に渡す（クイズの答え・オチ・結論まで届くように）
+  //     ③名前（キャラ名・自分の名前）はどの会話にも出てくるので、検索の手がかりから外す
   function crossRoomContext(){
     const th = parseInt(get(LS.xroom,'4'), 10);
     if (!th) return '';
     const need = th * 2;                    // 控えめ=8点以上 / しっかり=4点以上
     const cur = curThread();
-    const q = lastUserText() || '';
-    if (q.replace(/\s/g, '').length < 6) return '';
-    const grams = contentGrams(q);
-    if (!grams.length) return '';
-    const who = m => (m.role === 'model' ? get(LS.name,'碧') : (get(LS.uname,'') || '私'));
+    // 名前は手がかりにしない（どの会話にも出てくるので、関係ない場面まで拾ってしまう）
+    const cname = get(LS.name,'碧').trim();
+    const uname = get(LS.uname,'').trim();
+    const nameWords = [cname, uname].filter(s => s && s.length >= 1);
+    const unName = s => {
+      let t = (s || '');
+      nameWords.forEach(n => { t = t.split(n).join('｜'); });
+      return t;
+    };
+    // 手がかり①：いま送ったメッセージ（重み1）
+    // 手がかり②：その直前の流れ＝相手の最後の返事＋自分のひとつ前の発言（重み0.5）
+    const vis = history.filter(m => m && !m.hidden && !m.diary && !m.imgp && (m.text || '').trim());
+    let qi = -1;
+    for (let i = vis.length - 1; i >= 0; i--){ if (vis[i].role === 'user'){ qi = i; break; } }
+    if (qi < 0) return '';
+    const q = vis[qi].text;
+    if (q.replace(/\s/g, '').length < 6) return '';   // 「うん」「OK」みたいな短い返事では探さない
+    let ctxText = '';
+    for (let i = qi - 1, got = 0; i >= 0 && got < 2 && i >= qi - 3; i--){
+      if ((vis[qi].ts || 0) - (vis[i].ts || 0) > 3 * 3600 * 1000) break;   // 3時間以上前は別の話
+      ctxText += '\n' + vis[i].text.slice(0, 300);
+      got++;
+    }
+    const grams = contentGrams(unName(q));
+    const ctxGrams = contentGrams(unName(ctxText)).filter(g => grams.indexOf(g) === -1);
+    if (grams.length + ctxGrams.length < 2) return '';
+    const score = (tx) => relScore(grams, tx) + relScore(ctxGrams, tx) * 0.5;
+
+    const who = m => (m.role === 'model' ? cname : (uname || '私'));
     const hits = [];
-    // 見つけたメッセージと、その直後の返事をセットで拾えるよう、位置も覚えておく
-    // limitBack：後ろから何通ぶんは「すでに見えている」ので拾わない（直後の返事としては使える）
+    // limitBack：後ろから何通ぶんは「すでに見えている」ので拾わない（その後の流れとしては使える）
     const scan = (list, srcId, limitBack) => {
       const clean = list.filter(m => m && !m.hidden && !m.diary && !m.imgp && (m.text || '').trim());
       const maxI = clean.length - (limitBack || 0);
@@ -1377,11 +1403,10 @@
         if (i >= maxI) return;
         const tx = m.text;
         if (tx.replace(/\s/g, '').length < 8) return;
-        const s = relScore(grams, tx);
+        const s = score(tx);
         if (s >= need) hits.push({ s: s, src: srcId, arr: clean, i: i, ts: m.ts || 0 });
       });
     };
-    // 今の部屋の「⏳深さより前」の古い会話（履歴では見えていない部分）
     // 今の部屋：⏳深さの外に流れた古い会話だけを探す（今送ったメッセージや見えている会話は拾わない）
     scan(history, 'here', histDepth());
     // ほかの部屋（独立の部屋にいる時・独立の部屋の中身は使わない）
@@ -1395,20 +1420,47 @@
     }
     if (!hits.length) return '';
     hits.sort((a, b) => (b.s - a.s) || (b.ts - a.ts));
-    // 見つけた会話＋その直後の返事を1セットにして、最大3セット
+    // 見つけた場面＋その後の流れを1セットにして、最大3セット
+    // 同じ場面の近くで何通もヒットした時（クイズの問題→はずれ→再挑戦…など）は、ひと続きのセットにまとめて
+    // その後の流れ（＝答え・オチ）まで渡す。1セット最大8通・時間が3時間以上飛んだら区切る
+    const AFTER = 7, MAXSET = 8, GAP = 3 * 3600 * 1000;
+    const isHit = {};
+    hits.forEach(x => { isHit[x.src + '#' + x.i] = true; });
     const used = {};
     const sets = [];
     for (let k = 0; k < hits.length && sets.length < 3; k++){
       const hh = hits[k];
-      if (used[hh.src + '#' + hh.i]) continue;
+      const key = j => hh.src + '#' + j;
+      if (used[key(hh.i)]) continue;
+      const arr = hh.arr;
+      const near = (a, b) => !(arr[a].ts && arr[b].ts && Math.abs(arr[a].ts - arr[b].ts) > GAP);
+      // 前にさかのぼって、同じ場面のヒットがあればそこから始める
+      let start = hh.i;
+      for (let j = hh.i - 1; j >= 0 && j >= start - AFTER; j--){
+        if (used[key(j)] || !near(j, j + 1)) break;
+        if (isHit[key(j)]) start = j;
+      }
+      // 後ろにたどって、ヒットが続く限り延ばし、その後も8通に届くまで
+      let lastHit = hh.i, end = start;
+      for (let j = start; j < arr.length; j++){
+        if (j > start && (!near(j - 1, j) || used[key(j)])) break;
+        if (isHit[key(j)]) lastHit = Math.max(lastHit, j);
+        if (j > lastHit + AFTER) break;
+        end = j;
+      }
+      // 長すぎる時は、いちばん関係の強いヒット側を残しつつ末尾（答え・オチ）を優先して削る
+      if (end - start + 1 > MAXSET) start = Math.max(start, Math.min(hh.i, end - MAXSET + 1));
+      if (end - start + 1 > MAXSET) end = start + MAXSET - 1;
       const lines = [];
-      [hh.i, hh.i + 1].forEach(j => {
-        const m = hh.arr[j];
-        if (!m) return;
-        used[hh.src + '#' + j] = true;
-        lines.push(who(m) + '：' + (m.text.length > 140 ? m.text.slice(0, 140) + '…' : m.text));
-      });
-      sets.push(lines.join('\n'));
+      for (let j = start; j <= end; j++){
+        used[key(j)] = true;
+        const m = arr[j];
+        lines.push(who(m) + '：' + (m.text.length > 120 ? m.text.slice(0, 120) + '…' : m.text));
+      }
+      const block = lines.join('\n');
+      // 全部で2400字くらいまで（API代を増やしすぎない）
+      if (sets.length && sets.join('').length + block.length > 2400) break;
+      sets.push(block);
     }
     return sets.join('\n―――\n');
   }
@@ -1654,9 +1706,11 @@
   });
 
   function saveHistory(){
-    if (history.length > 200) history = history.slice(-200);
+    // 200件を超えた分は保存時だけ切り詰める（メモリ上の history は触らない）
+    // → 画面上のバブルの hidx がズレなくなる
+    const toSave = history.length > 200 ? history.slice(-200) : history;
     try {
-      localStorage.setItem(histKey(curId), JSON.stringify(history));
+      localStorage.setItem(histKey(curId), JSON.stringify(toSave));
     } catch(e){
       addBubble('error','⚠️ 保存に失敗したよ（容量がいっぱいかも）。⚙︎の容量メーターを確認して、💾バックアップ→背景画像を外す・古い話題の整理をしてみて');
     }
@@ -2460,6 +2514,16 @@
       localStorage.setItem(LS.amem, next);
     } catch(e){ return; }
     addMemoBubble(block);
+  }
+
+  // 🧠 頭の中の行数カウンター更新
+  function updateAmemCount(){
+    const el = document.getElementById('amemCount');
+    if (!el) return;
+    const v = document.getElementById('autoMem').value.trim();
+    const n = v ? v.split('\n').filter(Boolean).length : 0;
+    el.textContent = n + ' / 300行';
+    el.style.color = n >= 270 ? 'var(--danger)' : 'var(--ink-dim)';
   }
 
   function autoMemoryTick(){
@@ -3299,7 +3363,10 @@
     if (!confirm('自動でたまった「頭の中」のメモを全部消す？（あなたが書いた思い出ノートは消えないよ）')) return;
     localStorage.removeItem(LS.amem);
     document.getElementById('autoMem').value = '';
+    updateAmemCount();
   });
+
+  document.getElementById('autoMem').addEventListener('input', updateAmemCount);
 
   document.getElementById('findImgBtn').addEventListener('click', async () => {
     const apiKey = document.getElementById('apiKey').value.trim() || get(LS.key,'');
@@ -3347,6 +3414,7 @@
     document.getElementById('sysPrompt').value = get(LS.sys, DEFAULT_SYS);
     document.getElementById('memory').value = get(LS.mem,'');
     document.getElementById('autoMem').value = get(LS.amem,'');
+    updateAmemCount();
     document.getElementById('annivList').value = get(LS.anniv,'');
     document.getElementById('autoGreet').checked = flag(LS.greet);
     document.getElementById('autoNudge').checked = flag(LS.nudge);
