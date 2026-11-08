@@ -987,6 +987,8 @@
     snsFol: KP + 'snsfol',
     snsFreq: KP + 'snsfreq',
     snsSeedHist: KP + 'snsseedhist',
+    snsAnnivAt: KP + 'snsannivat',
+    snsAnnivAng: KP + 'snsannivang',
     snsSeen: KP + 'snsseen'
   };
 
@@ -2558,24 +2560,29 @@
   }
 
   /* ---------- anniversary & weather ---------- */
-  function annivContext(){
-    const lines = get(LS.anniv,'').split('\n');
+  // 今日〜7日先の記念日だけを [{name, diff}] で返す（diff=0が当日）
+  function annivNear(){
     const list = [];
-    lines.forEach(l => {
+    get(LS.anniv,'').split('\n').forEach(l => {
       const m = l.match(/(\d{1,2})\s*[\/\-月]\s*(\d{1,2})日?\s*(.+)/);
       if (m) list.push({mo:+m[1], da:+m[2], name:m[3].trim()});
     });
-    if (!list.length) return '';
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const notes = [];
+    const out = [];
     list.forEach(a => {
       let d = new Date(now.getFullYear(), a.mo-1, a.da);
       if (d < today) d = new Date(now.getFullYear()+1, a.mo-1, a.da);
       const diff = Math.round((d - today) / 86400000);
-      if (diff === 0) notes.push('今日は「' + a.name + '」！ちゃんとお祝いして。');
-      else if (diff <= 7) notes.push('「' + a.name + '」まであと' + diff + '日。さりげなく楽しみにしてる気持ちを出してもいい。');
+      if (diff <= 7) out.push({ name: a.name, diff: diff });
     });
+    return out;
+  }
+
+  function annivContext(){
+    const notes = annivNear().map(a => a.diff === 0
+      ? '今日は「' + a.name + '」！ちゃんとお祝いして。'
+      : '「' + a.name + '」まであと' + a.diff + '日。さりげなく楽しみにしてる気持ちを出してもいい。');
     return notes.length ? '記念日情報：' + notes.join(' ') : '';
   }
 
@@ -4447,9 +4454,38 @@
   }
 
   // 思い出ノート＋頭の中メモから、ネタになりそうな1行をランダムに（見出しや短すぎる行は除く）
-  function snsPickMemoryLine(){
+  // 記念日の投稿の「中身の切り口」。最近使ったものは避けて順番に回す
+  const SNS_ANNIV_ANGLES = [
+    '当日に向けて準備していること・こっそり用意しているもの',
+    '当日やりたいこと・一緒に食べたいもの・行きたい場所',
+    'この1年で増えたもの・変わった暮らし（部屋・習慣・持ち物など）',
+    '改めて「ここが好きだな」と思った相手の一面（名前は伏せて）',
+    '去年の今ごろの自分に言ってやりたいこと',
+    'プレゼントや手紙をどうするか、地味に悩んでいること',
+    '記念日が近づいて、何気ない日常の中でふと意識した瞬間',
+    'この1年でいちばん笑った出来事（記念日そのものの話以外）'
+  ];
+  const SNS_ANNIV_DAY = [
+    '朝いちばんに思ったこと・当日の始まり',
+    'この1年をひとことで振り返る',
+    'これからの1年でしたいこと・約束したいこと',
+    'あの日と今日を比べて変わったところ'
+  ];
+  function snsPickAnnivAngle(isDay){
+    let used = [];
+    try { used = JSON.parse(get(LS.snsAnnivAng,'[]')) || []; } catch(e){ used = []; }
+    const arr = isDay ? SNS_ANNIV_DAY : SNS_ANNIV_ANGLES;
+    const fresh = arr.filter(a => used.indexOf(a) === -1);
+    const pick = snsPick(fresh.length ? fresh : arr);
+    try { localStorage.setItem(LS.snsAnnivAng, JSON.stringify(used.filter(a => a !== pick).concat([pick]).slice(-6))); } catch(e){}
+    return pick;
+  }
+
+  // avoid：この手がかりを含む行は選ばない（記念日を書かない回に、記念日の思い出を拾わないため）
+  function snsPickMemoryLine(avoid){
     const lines = (get(LS.mem,'') + '\n' + get(LS.amem,'')).split('\n').map(l => l.trim())
-      .filter(l => l.replace(/^\d{4}[\/\-.]\d{1,2}[\/\-.]\d{1,2}\s*/, '').length >= 10 && !/^[【#■◆●\[]/.test(l));
+      .filter(l => l.replace(/^\d{4}[\/\-.]\d{1,2}[\/\-.]\d{1,2}\s*/, '').length >= 10 && !/^[【#■◆●\[]/.test(l))
+      .filter(l => !(avoid && avoid.length && relScore(avoid, l) >= 2));
     if (!lines.length) return '';
     const used = snsSeedHist();
     const fresh = lines.filter(l => used.indexOf('mem:' + l) === -1);
@@ -4710,13 +4746,39 @@
       const fol = snsFollowers();
       const h = new Date().getHours();
       const band = (h >= 5 && h < 11) ? '朝' : (h >= 11 && h < 17) ? '昼' : (h >= 17 && h < 23) ? '夜' : '深夜';
+      // 記念日のカウントダウンは「1日1回」（当日はお祝い1回）。中身は毎回ちがう切り口にする
       const ann = annivContext();
-      let theme, seed = '';
-      if (ann && Math.random() < 0.6){
-        theme = '近づいている記念日にちなんだ投稿（' + ann + '）';
+      const annNear = annivNear();
+      const annToday = annNear.some(a => a.diff === 0);
+      const lastAnn = parseInt(get(LS.snsAnnivAt,'0'), 10) || 0;
+      const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0);
+      const useAnn = !!ann && lastAnn < dayStart.getTime() && Math.random() < 0.9;   // 今日まだ記念日の投稿をしていなければ
+      const annNameGrams = annNear.reduce((g, a) => g.concat(contentGrams(a.name)), []).filter(g => !/^(記念|念日|記念日)$/.test(g));
+      // 今日のカウントダウンが済んだ後の投稿は、記念日にまつわる話・思い出をネタにしない（例：「プロポーズ」が入った思い出の行）
+      const annGrams = (ann && !annToday && !useAnn) ? annNameGrams : [];
+      const annAvoid = annGrams.length
+        ? '（近づいている記念日（' + annNear.map(a => a.name).join('・') + '）の話題・カウントダウン・それにまつわる思い出話は、今回は書かない）'
+        : '';
+      let theme, seed = '', annAngle = '';
+      if (useAnn){
+        seed = 'anniv';
+        annAngle = snsPickAnnivAngle(annToday);
+        // これまでの記念日投稿（数える部分以外が同じにならないよう、全文で見せる）
+        const prevAnn = snsLoad().filter(p => p.who === 'char' && (Date.now() - (p.ts || 0)) < 10 * 86400000 &&
+          (p.anniv || /あと\s*[0-9０-９一二三四五六七]+\s*日|記念日/.test(p.text || '') || (annNameGrams.length && relScore(annNameGrams, p.text || '') >= 2)))
+          .slice(0, 6).map(p => '・' + (p.text || '').replace(/\s+/g, ' ')).join('\n');
+        theme = (annToday ? '今日の記念日をお祝いする投稿（' : '近づいている記念日のカウントダウン投稿（') + ann + '）。' +
+          (annToday ? '' : '「◯◯まであと◯日」のように数えるのは入れる。') +
+          'そのうえで、今回の中身はこの切り口で書く：' + annAngle + '。' +
+          (prevAnn ? '\nこれまでの記念日の投稿（使用済み）：\n' + prevAnn +
+            '\nここに出てきたエピソード・思い出話・言い回し・締め方は使わない。数える部分以外は、まったく別の内容にする。' : '') +
+          '\n記念日にまつわる昔の出来事（あの日の経緯など）は、使用済みの投稿にすでに書かれていたら二度と書かない';
       } else {
         const r = Math.random();
-        const memLine = snsPickMemoryLine();
+        let memLine = snsPickMemoryLine();
+        if (memLine && annGrams.length && relScore(annGrams, memLine) >= 2){
+          memLine = snsPickMemoryLine(annGrams);
+        }
         if (r < 0.36){
           seed = snsPickFresh(SNS_SEEDS_DAILY);
           theme = uname + 'がそばにいない時間の、あなた自身の日常の一コマ。今回の切り口：' + seed + '。' + uname + 'の話は出さなくてもいい。' +
@@ -4736,6 +4798,7 @@
           seed = snsPickFresh(SNS_SEEDS_DAILY.concat(SNS_SEEDS_HEART));
           theme = '最近の暮らしや出来事をふまえた、さりげない惚気・匂わせ（フォロワーに向けた書き方で）。今回の切り口：' + seed;
         }
+        if (annAvoid) theme += annAvoid;
       }
       let wx = '';
       if (flag0(LS.weather)) { try { wx = await weatherContext(); } catch(e){} }
@@ -4795,7 +4858,7 @@
         if (lower < now - 60000) ts = lower + Math.floor(Math.random() * (now - lower - 60000));
       }
       const post = {
-        id: snsId(), who: 'char', text: parsed.main, ts: ts, at: now,
+        id: snsId(), who: 'char', text: parsed.main, ts: ts, at: now, anniv: seed === 'anniv' || undefined,
         likes: fol.length ? snsRand(Math.max(1, fol.length - 1), fol.length + 6) : snsRand(4, 28),
         replies: []
       };
@@ -4803,6 +4866,7 @@
       posts.unshift(post);
       snsSave(posts);
       snsRememberSeed(seed);
+      if (seed === 'anniv'){ try { localStorage.setItem(LS.snsAnnivAt, String(Date.now())); } catch(e){} }
       snsSetNote('');
       if (snsSheet.classList.contains('show')){ snsRender(); snsMarkSeen(); }
       else snsUpdateBadge();
