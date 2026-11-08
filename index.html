@@ -4427,6 +4427,15 @@
     '天気や体調、部屋の中のちょっとした変化',
     '自分の趣味や特技に関すること'
   ];
+  // ふたりの暮らし・相手やペットの気配がにじむ切り口
+  const SNS_SEEDS_LIFE = [
+    'ふたりで過ごした時間のちょっとした一コマ（一緒に食べたもの・観たもの・やりとりの小ネタ）',
+    '相手の口ぐせや、思わず笑ってしまった相手の言動',
+    'ペット・動物の様子（キャラ設定・思い出・会話に出てくる子だけ。名前や性格はそこに書かれているとおりに。どこにも出てこなければ、相手の好きな動物の話にする）',
+    'ペット・動物と相手のやりとりで微笑ましかったこと（キャラ設定・思い出・会話に出てくる子だけ。いなければ、相手と動物にまつわる話にする）',
+    '相手の仕事や、いま頑張っていることを気にかけていること（会話やメモに書かれている範囲で）',
+    '相手の好きなもの（食べ物・趣味など）を見かけて、相手を思い浮かべたこと'
+  ];
   const SNS_SEEDS_HEART = [
     '相手の小さな癖や、気づいたら目で追っているところ',
     '相手のためにこっそり計画していること（次に行きたい場所・サプライズ・買ってあげたいもの）',
@@ -4779,24 +4788,29 @@
         if (memLine && annGrams.length && relScore(annGrams, memLine) >= 2){
           memLine = snsPickMemoryLine(annGrams);
         }
-        if (r < 0.36){
+        // 配分（2026/11 祐佳里と相談）：約6割は祐佳里の気配あり、約4割は彼ひとりの日常
+        //   ひとりの日常40% ／ チャットで話したこと22% ／ ふたりの暮らし・ペット16% ／ 本音12% ／ 思い出10%
+        if (r < 0.40){
           seed = snsPickFresh(SNS_SEEDS_DAILY);
           theme = uname + 'がそばにいない時間の、あなた自身の日常の一コマ。今回の切り口：' + seed + '。' + uname + 'の話は出さなくてもいい。' +
             '会話ログに出てくる出来事（ふたりでしたこと）はこの切り口では使わず、ログにない、あなたひとりの時間の出来事にする';
-        } else if (r < 0.62){
+        } else if (r < 0.62 && conv){
+          seed = 'today';
+          theme = '会話ログにある、ここ1〜2日にふたりで実際にしたこと・話したこと・' + uname + 'から聞いた話の中から1つ選んで、名前を伏せた匂わせで。' +
+            '出来事の事実（一緒にしたこと・どこで・何を・誰が言ったか）はログのとおりに書き、ひとりでしたことや偶然の出来事に変えない。会話の文面は引用しない';
+        } else if (r < 0.78 || (r < 0.62 && !conv)){
+          seed = snsPickFresh(SNS_SEEDS_LIFE);
+          theme = 'ふたりの暮らしや、' + uname + 'とのことがにじむ投稿（名前を伏せた匂わせで、フォロワーにちょっと惚気るくらいの温度）。今回の切り口：' + seed;
+        } else if (r < 0.90){
           seed = snsPickFresh(SNS_SEEDS_HEART);
           theme = '本人には直接言っていない本音を、名前は出さずに独り言として。今回の切り口：' + seed + '。重くなりすぎず、本人が読んだらキュンとするくらいの温度で';
-        } else if (r < 0.78 && memLine){
+        } else if (memLine){
           seed = 'mem:' + memLine;
           theme = 'ふと思い出した、ふたりの思い出のワンシーン（名前を伏せた匂わせで）。今回の思い出：「' + memLine + '」。' +
             '書かれている事実（いつ・どこで・誰と・何を）は変えず、書かれていないことは足さない。SNSに書いても' + uname + 'が困らない範囲で';
-        } else if (r < 0.92 && conv){
-          seed = 'today';
-          theme = '会話ログにある、ここ1〜2日にふたりで実際にしたこと・話したことの中から1つ選んで、名前を伏せた匂わせで。' +
-            '出来事の事実（一緒にしたこと・どこで・何を）はログのとおりに書き、ひとりでしたことや偶然の出来事に変えない。会話の文面は引用しない';
         } else {
-          seed = snsPickFresh(SNS_SEEDS_DAILY.concat(SNS_SEEDS_HEART));
-          theme = '最近の暮らしや出来事をふまえた、さりげない惚気・匂わせ（フォロワーに向けた書き方で）。今回の切り口：' + seed;
+          seed = snsPickFresh(SNS_SEEDS_LIFE);
+          theme = 'ふたりの暮らしや、' + uname + 'とのことがにじむ投稿（名前を伏せた匂わせで）。今回の切り口：' + seed;
         }
         if (annAvoid) theme += annAvoid;
       }
@@ -4813,7 +4827,7 @@
         '\n・フォロワー全員に向けた独り言のつぶやきとして書く。' + uname + 'に話しかけたり、' + uname + 'の発言に答えたりしない（それはチャットでやること）。' +
         '\n・投稿の中で' + uname + 'の名前は出さない。触れる時は名前を伏せた匂わせにする。' +
         '\n・「今回の切り口」に沿って、具体的なもの（料理名・場所・物・数字・固有の出来事など）を1つ以上入れる。ぼんやりした感想だけで終わらせない。' +
-        '\n・毎回同じ締め方（「帰りを待ってる」「迎える準備をする」など）にしない。ペットや相棒の話も、切り口に関係ない時は無理に入れない。' +
+        '\n・毎回同じ締め方（「帰りを待ってる」「迎える準備をする」など）にしない。ペットの話で毎回締めるのもしない（切り口がペットの時は主役にしていい）。' +
         '\n・季節・天気・気温の話は、切り口が季節や天気の時以外はメインにしない（添えるとしても一言まで）。音楽・本・動画の話も、切り口がそれの時以外は持ち出さない。';
 
       const baseP = (extra) => {
@@ -4891,17 +4905,25 @@
     if (st.d !== si.dk || !Array.isArray(st.s)) st = { d: si.dk, s: [] };
     if (st.s.indexOf(si.slot) !== -1) return;
     if (freq === '1' && st.s.length) return;
+    // 「考え中」の付箋：3分以内なら、別の画面（Safariのタブ等）で考え中かもしれないので待つ。
+    // 3分たっても「済み」になっていない付箋は、途中でアプリが閉じられたものとみなしてやり直す
+    const run = (st.run && typeof st.run === 'object') ? st.run : {};
+    if (run[si.slot] && Date.now() - run[si.slot] < 3 * 60000) return;
     snsAutoRunning = true;
-    st.s.push(si.slot);
+    run[si.slot] = Date.now();
+    st.run = run;
     try { localStorage.setItem(LS.snsSlot, JSON.stringify(st)); } catch(e){}
     const ok = await snsGeneratePost(false, si.start);
-    if (!ok){
-      // 失敗した時は枠を戻して、次に開いた時にもう一度
-      try {
-        st.s = st.s.filter(x => x !== si.slot);
-        localStorage.setItem(LS.snsSlot, JSON.stringify(st));
-      } catch(e){}
-    }
+    // つぶやきが完成してから「済み」の印をつける（失敗した時は付箋だけはがして、次に開いた時にもう一度）
+    try {
+      let cur = {};
+      try { cur = JSON.parse(get(LS.snsSlot,'{}')) || {}; } catch(e){ cur = {}; }
+      if (cur.d !== si.dk || !Array.isArray(cur.s)) cur = { d: si.dk, s: [] };
+      if (!cur.run || typeof cur.run !== 'object') cur.run = {};
+      delete cur.run[si.slot];
+      if (ok && cur.s.indexOf(si.slot) === -1) cur.s.push(si.slot);
+      localStorage.setItem(LS.snsSlot, JSON.stringify(cur));
+    } catch(e){}
     snsAutoRunning = false;
   }
 
