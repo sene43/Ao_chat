@@ -596,6 +596,7 @@
   <button id="imgPromptBtn" class="menu-row">🎨 いまの場面の画像プロンプトを作る</button>
   <button id="favBtn" class="menu-row">⭐ ふたりのアルバム・記録</button>
   <button id="openSearch" class="menu-row">🔎 メッセージ検索</button>
+  <button id="diagBtn" class="menu-row">🕸 思い出し診断（何を拾えてるか見る）</button>
 </div>
 
 <div id="favSheet" class="sheet" role="dialog" aria-label="アルバム">
@@ -1367,8 +1368,9 @@
   // v2：①「覚えてないの？」みたいな短い追いかけ質問でも、直前の流れ（自分の前の発言・相手の返事）から話題を拾う
   //     ②見つけた場面の「その後」を3通まで一緒に渡す（クイズの答え・オチ・結論まで届くように）
   //     ③名前（キャラ名・自分の名前）はどの会話にも出てくるので、検索の手がかりから外す
-  function crossRoomContext(){
+  function crossRoomContext(dbg){
     const th = parseInt(get(LS.xroom,'4'), 10);
+    if (dbg){ dbg.th = th || 0; dbg.need = (th || 0) * 2; dbg.depth = histDepth(); dbg.otherRooms = 0; dbg.hereScanned = 0; dbg.all = []; }
     if (!th) return '';
     const need = th * 2;                    // 控えめ=8点以上 / しっかり=4点以上
     const cur = curThread();
@@ -1386,9 +1388,9 @@
     const vis = history.filter(m => m && !m.hidden && !m.diary && !m.imgp && (m.text || '').trim());
     let qi = -1;
     for (let i = vis.length - 1; i >= 0; i--){ if (vis[i].role === 'user'){ qi = i; break; } }
-    if (qi < 0) return '';
+    if (qi < 0){ if (dbg) dbg.reason = '自分のメッセージが見つからない'; return ''; }
     const q = vis[qi].text;
-    if (q.replace(/\s/g, '').length < 6) return '';   // 「うん」「OK」みたいな短い返事では探さない
+    if (q.replace(/\s/g, '').length < 6){ if (dbg) dbg.reason = '聞いた文が短すぎる（6文字未満）ので探さない設定'; return ''; }   // 「うん」「OK」みたいな短い返事では探さない
     let ctxText = '';
     for (let i = qi - 1, got = 0; i >= 0 && got < 2 && i >= qi - 3; i--){
       if ((vis[qi].ts || 0) - (vis[i].ts || 0) > 3 * 3600 * 1000) break;   // 3時間以上前は別の話
@@ -1400,7 +1402,8 @@
     // 混ぜると、いま話してる雑談と言葉が似た関係ない場面が上位に来てしまうため。
     // 「覚えてないの？」のような短い追いかけ質問の時だけ、直前の流れから話題を借りる
     const ctxGrams = (grams.length >= 8) ? [] : contentGrams(unName(ctxText)).filter(g => grams.indexOf(g) === -1);
-    if (grams.length + ctxGrams.length < 2) return '';
+    if (dbg){ dbg.grams = grams.length; dbg.ctxN = ctxGrams.length; }
+    if (grams.length + ctxGrams.length < 2){ if (dbg) dbg.reason = '探す手がかりになる言葉（カタカナ・漢字・英数字）が少なすぎる'; return ''; }
     const score = (tx) => relScore(grams, tx) + relScore(ctxGrams, tx) * 0.5;
 
     const who = m => (m.role === 'model' ? cname : (uname || '私'));
@@ -1409,11 +1412,13 @@
     const scan = (list, srcId, limitBack) => {
       const clean = list.filter(m => m && !m.hidden && !m.diary && !m.imgp && (m.text || '').trim());
       const maxI = clean.length - (limitBack || 0);
+      if (dbg){ if (srcId === 'here') dbg.hereScanned = Math.max(0, maxI); else dbg.otherRooms++; }
       clean.forEach((m, i) => {
         if (i >= maxI) return;
         const tx = m.text;
         if (tx.replace(/\s/g, '').length < 8) return;
         const s = score(tx);
+        if (dbg && s > 0) dbg.all.push({ s: s, src: srcId, text: tx, ts: m.ts || 0 });
         if (s >= need) hits.push({ s: s, src: srcId, arr: clean, i: i, ts: m.ts || 0 });
       });
     };
@@ -1428,6 +1433,7 @@
         scan(h, t.id);
       });
     }
+    if (dbg) dbg.hitN = hits.length;
     if (!hits.length) return '';
     hits.sort((a, b) => (b.s - a.s) || (b.ts - a.ts));
     // 見つけた場面＋その後の流れを1セットにして、最大3セット
@@ -2309,6 +2315,99 @@
       return t.slice(0, Math.floor(t.length / 2)).trim();
     }
     return t;
+  }
+
+  // 🕸 思い出し診断：「この聞き方なら、昔の会話の何が何点で拾われて、何が渡るか」を画面に出す（API代0円・会話には残らない）
+  function buildDiagText(dbg, xr){
+    const L = [];
+    const q = (dbg.query || '').replace(/\s+/g, ' ');
+    L.push('探した文：「' + (q.length > 60 ? q.slice(0, 60) + '…' : q) + '」');
+    if (!dbg.th){
+      L.push('・🕸の設定：しない → 昔の会話を探してないよ。⚙︎🔔ふるまいで「しっかり」にしてね');
+      return L.join('\n');
+    }
+    L.push('・🕸の設定：' + (dbg.need >= 8 ? '控えめ' : 'しっかり') + '（合格' + dbg.need + '点）');
+    if (dbg.reason){
+      L.push('・探さなかった理由：' + dbg.reason);
+      return L.join('\n');
+    }
+    L.push('・探せる範囲：この部屋の ' + (dbg.hereScanned || 0) + '通（直近' + dbg.depth + '通は最初から見えてるので除く）' +
+      (dbg.otherRooms ? ' ＋ ほかの部屋 ' + dbg.otherRooms + 'つ' : ''));
+    L.push('・手がかり：' + (dbg.grams || 0) + '個' + (dbg.ctxN ? ' ＋ 直前の流れ ' + dbg.ctxN + '個' : '（直前の流れは混ぜてない）'));
+    L.push('・合格点以上の場面：' + (dbg.hitN || 0) + '件');
+    const top = (dbg.all || []).slice().sort((a, b) => (b.s - a.s) || (b.ts - a.ts)).slice(0, 4);
+    if (top.length){
+      L.push('・点数の高い発言（上位）：');
+      top.forEach((x, i) => {
+        const t = x.text.replace(/\s+/g, ' ');
+        L.push('  ' + (i + 1) + '. ' + (x.s >= dbg.need ? '◎' : '×') + ' ' + (Math.round(x.s * 10) / 10) + '点 ' +
+          (x.src === 'here' ? 'この部屋' : 'ほかの部屋') + (x.ts ? ' ' + fmtDate(x.ts).replace(/^\d+年/, '') : '') +
+          '「' + (t.length > 40 ? t.slice(0, 40) + '…' : t) + '」');
+      });
+    } else {
+      L.push('・点数がついた発言：0件（探せる範囲に、手がかりの言葉を含む発言がなかったよ）');
+    }
+    L.push('');
+    L.push(xr ? '▼実際に渡る文面（' + xr.length + '字）\n' + xr : '▼何も渡らない（合格点の場面がなかったよ）');
+    return L.join('\n');
+  }
+
+  function addDiagBubble(text){
+    const hint = chatEl.querySelector('.empty-hint');
+    if (hint) hint.remove();
+    const d = document.createElement('div');
+    d.className = 'msg memo';
+    const label = document.createElement('div');
+    label.className = 'memo-label';
+    label.textContent = '🕸 思い出し診断（この結果は会話に残らないよ）';
+    const body = document.createElement('div');
+    body.textContent = text;
+    body.style.whiteSpace = 'pre-wrap';
+    const cp = document.createElement('button');
+    cp.className = 'copy-btn';
+    cp.textContent = '📋 コピー';
+    cp.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(text);
+        cp.textContent = '✓ コピーした！';
+        setTimeout(() => { cp.textContent = '📋 コピー'; }, 1200);
+      } catch(e){}
+    });
+    const close = document.createElement('button');
+    close.className = 'copy-btn';
+    close.style.marginLeft = '8px';
+    close.textContent = '✕ 閉じる';
+    close.addEventListener('click', () => d.remove());
+    d.appendChild(label); d.appendChild(body); d.appendChild(cp); d.appendChild(close);
+    chatEl.appendChild(d);
+    scrollToMsg(d);
+  }
+
+  function runDiag(){
+    if (busy) return;
+    const raw = window.prompt('どんな聞き方をした想定で探す？\n例：ユニクロで試着した時のサイズ覚えてる？\n（空欄＝いまの会話の、自分の最後のメッセージで探す）', '');
+    if (raw === null) return;
+    const typed = raw.trim();
+    const dbg = {};
+    let xr = '';
+    const saved = history;
+    try {
+      if (typed){
+        // 「いま送った」ことにして探す（本物の会話には何も足さない）
+        history = saved.concat([{ role:'user', text: typed, ts: Date.now() }]);
+        dbg.query = typed;
+      } else {
+        dbg.query = lastUserText();
+      }
+      if (!dbg.query){ addBubble('error','探す文がないよ。聞き方を入力してみてね'); return; }
+      xr = crossRoomContext(dbg);
+    } catch(e){
+      addBubble('error','診断でエラー: ' + e.message);
+      return;
+    } finally {
+      history = saved;
+    }
+    addDiagBubble(buildDiagText(dbg, xr));
   }
 
   function addPromptBubble(text, save){
@@ -4243,6 +4342,11 @@
   document.getElementById('imgPromptBtn').addEventListener('click', () => {
     closeSheets();
     makeImagePrompt();
+  });
+
+  document.getElementById('diagBtn').addEventListener('click', () => {
+    closeSheets();
+    runDiag();
   });
 
   document.getElementById('favBtn').addEventListener('click', () => {
