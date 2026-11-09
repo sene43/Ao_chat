@@ -1396,7 +1396,10 @@
       got++;
     }
     const grams = contentGrams(unName(q));
-    const ctxGrams = contentGrams(unName(ctxText)).filter(g => grams.indexOf(g) === -1);
+    // 聞いた文に手がかりが十分ある時（「ユニクロで試着した話」など）は、直前の雑談を混ぜない。
+    // 混ぜると、いま話してる雑談と言葉が似た関係ない場面が上位に来てしまうため。
+    // 「覚えてないの？」のような短い追いかけ質問の時だけ、直前の流れから話題を借りる
+    const ctxGrams = (grams.length >= 8) ? [] : contentGrams(unName(ctxText)).filter(g => grams.indexOf(g) === -1);
     if (grams.length + ctxGrams.length < 2) return '';
     const score = (tx) => relScore(grams, tx) + relScore(ctxGrams, tx) * 0.5;
 
@@ -1462,11 +1465,12 @@
       for (let j = start; j <= end; j++){
         used[key(j)] = true;
         const m = arr[j];
-        lines.push(who(m) + '：' + (m.text.length > 120 ? m.text.slice(0, 120) + '…' : m.text));
+        const lim = isHit[key(j)] ? 320 : 120;
+        lines.push(who(m) + '：' + (m.text.length > lim ? m.text.slice(0, lim) + '…' : m.text));
       }
       const block = lines.join('\n');
       // 全部で2400字くらいまで（API代を増やしすぎない）
-      if (sets.length && sets.join('').length + block.length > 2400) break;
+      if (sets.length && sets.join('').length + block.length > 3200) break;
       sets.push(block);
     }
     return sets.join('\n―――\n');
