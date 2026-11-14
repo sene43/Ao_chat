@@ -596,7 +596,6 @@
   <button id="imgPromptBtn" class="menu-row">🎨 いまの場面の画像プロンプトを作る</button>
   <button id="favBtn" class="menu-row">⭐ ふたりのアルバム・記録</button>
   <button id="openSearch" class="menu-row">🔎 メッセージ検索</button>
-  <button id="diagBtn" class="menu-row">🕸 思い出し診断（何を拾えてるか見る）</button>
 </div>
 
 <div id="favSheet" class="sheet" role="dialog" aria-label="アルバム">
@@ -772,7 +771,7 @@
     <select id="depthSel">
       <option value="40">ふつう（直近40件・節約）</option>
       <option value="120">深い（直近120件）</option>
-      <option value="200">いちばん深い（直近200件）</option>
+      <option value="200">全部（保存されている約200件）</option>
     </select>
     <div class="hint">この設定は「いま開いてる話題（部屋）」にだけ効くよ。どの部屋がどの深さかは💬リストの⏳マークで確認できる。深いほど1通あたりのトークン消費が増える（無料枠のGemmaやFlashなら気にしなくてOK、Pro級は節約推奨）。大事なことは今まで通り💭で思い出ノートへ。</div>
   </div>
@@ -922,9 +921,6 @@
   <button class="btn primary" id="saveBtn">保存する</button>
   <button class="btn line" data-pane="data" id="backupBtn">💾 バックアップを保存（設定＋思い出＋会話）</button>
   <button class="btn line" data-pane="data" id="restoreBtn">📂 バックアップから復元</button>
-  <button class="btn line" data-pane="data" id="mergeBtn">🧩 バックアップから会話だけ合流（今の会話は消えない）</button>
-  <div class="hint" data-pane="data">会話が上で切れてしまった時に。バックアップにだけ残っている昔の会話を、今の会話に足して時刻順に並べ直すよ。設定や思い出ノートは変えないし、今の会話は1通も消えない。同じバックアップを何回合流しても増えないよ。</div>
-  <input type="file" id="mergeInput" accept="application/json,.json" hidden>
   <button class="btn line" data-pane="data" id="exportBtn">📜 この話題を読み物として保存</button>
   <button class="btn line" data-pane="data" id="syncPackBtn">🤝 ChatGPT用の同期パックを保存</button>
   <div class="hint" data-pane="data">キャラクター設定・思い出・画像用の見た目などを、ChatGPTへ渡せる安全なファイルにします。APIキーは入りません。</div>
@@ -1297,6 +1293,43 @@
       .replace(/\*\*/g, '');
   }
 
+  // Argonなど一部のモデルが、内部の「思考過程」の見出しを本文に漏らすことがある
+  // （例：「模型的思考过程（隐藏）」）。見出しだけの行と、中国語（簡体字）だけの短い行を取り除く。
+  // セリフ本文には触らない。全部消えてしまう時は元のまま返す（空返事にしないため）
+  const THOUGHT_LABEL_ZH = /^[\s*#>\-•・【\[（(「『"]*(?:(?:模型|AI|助手|角色|モデル)(?:的|の)?|(?:the\s+)?model'?s?\s+)?(?:思考|思维|思維|推理)(?:过程|過程|プロセス)[\s*】\]）)」』"]*(?:[（(\[【][^）)\]】\n]{0,12}[）)\]】])?[\s*:：]*$/i;
+  const THOUGHT_LABEL_EN = /^[\s*#>\-•]*(?:the\s+model'?s?\s+)?(?:thinking|thought|reasoning)\s+process[\s*:：]*(?:[（(\[][^)）\]\n]{0,12}[)）\]])?[\s*:：]*$/i;
+  const THOUGHT_PREFIX_ZH = /^[\s*#>]*(?:(?:模型|AI|助手|モデル)(?:的|の)?)?(?:思考|思维|思維|推理)(?:过程|過程)\s*[（(][^）)\n]{0,10}[）)][\s*:：]*(?=\S)/;
+  const SIMPLIFIED_ONLY = '过这们说为吗没还对时现开种觉样让谁头问关间题认应该书买儿爱听隐处';
+  function countSimplified(s){
+    let n = 0;
+    for (const ch of s) if (SIMPLIFIED_ONLY.indexOf(ch) !== -1) n++;
+    return n;
+  }
+  function stripThoughtLabels(text){
+    if (!text || typeof text !== 'string') return text;
+    const lines = text.split('\n');
+    let changed = false;
+    const out = [];
+    let seenBody = false;
+    lines.forEach(line => {
+      const t = line.trim();
+      if (!t){ out.push(line); return; }
+      if (t.length <= 40){
+        if (THOUGHT_LABEL_ZH.test(t) || THOUGHT_LABEL_EN.test(t)){ changed = true; return; }
+        if (!/[ぁ-んァ-ヶ]/.test(t) && countSimplified(t) >= 2){ changed = true; return; }
+      }
+      if (!seenBody && THOUGHT_PREFIX_ZH.test(t)){
+        line = line.replace(THOUGHT_PREFIX_ZH, '');
+        changed = true;
+      }
+      seenBody = true;
+      out.push(line);
+    });
+    if (!changed) return text;
+    const res = out.join('\n').replace(/^\s*\n+/, '').replace(/\n{3,}/g, '\n\n').trim();
+    return res || text;
+  }
+
   // 口癖ブロッカー：碧くんの直近の返事で3回以上くり返している言い回しを見つける（通信なし）
   function repeatedPhrases(){
     const norm = s => (s || '')
@@ -1368,9 +1401,8 @@
   // v2：①「覚えてないの？」みたいな短い追いかけ質問でも、直前の流れ（自分の前の発言・相手の返事）から話題を拾う
   //     ②見つけた場面の「その後」を3通まで一緒に渡す（クイズの答え・オチ・結論まで届くように）
   //     ③名前（キャラ名・自分の名前）はどの会話にも出てくるので、検索の手がかりから外す
-  function crossRoomContext(dbg){
+  function crossRoomContext(){
     const th = parseInt(get(LS.xroom,'4'), 10);
-    if (dbg){ dbg.th = th || 0; dbg.need = (th || 0) * 2; dbg.depth = histDepth(); dbg.otherRooms = 0; dbg.hereScanned = 0; dbg.all = []; }
     if (!th) return '';
     const need = th * 2;                    // 控えめ=8点以上 / しっかり=4点以上
     const cur = curThread();
@@ -1388,9 +1420,9 @@
     const vis = history.filter(m => m && !m.hidden && !m.diary && !m.imgp && (m.text || '').trim());
     let qi = -1;
     for (let i = vis.length - 1; i >= 0; i--){ if (vis[i].role === 'user'){ qi = i; break; } }
-    if (qi < 0){ if (dbg) dbg.reason = '自分のメッセージが見つからない'; return ''; }
+    if (qi < 0) return '';
     const q = vis[qi].text;
-    if (q.replace(/\s/g, '').length < 6){ if (dbg) dbg.reason = '聞いた文が短すぎる（6文字未満）ので探さない設定'; return ''; }   // 「うん」「OK」みたいな短い返事では探さない
+    if (q.replace(/\s/g, '').length < 6) return '';   // 「うん」「OK」みたいな短い返事では探さない
     let ctxText = '';
     for (let i = qi - 1, got = 0; i >= 0 && got < 2 && i >= qi - 3; i--){
       if ((vis[qi].ts || 0) - (vis[i].ts || 0) > 3 * 3600 * 1000) break;   // 3時間以上前は別の話
@@ -1398,12 +1430,8 @@
       got++;
     }
     const grams = contentGrams(unName(q));
-    // 聞いた文に手がかりが十分ある時（「ユニクロで試着した話」など）は、直前の雑談を混ぜない。
-    // 混ぜると、いま話してる雑談と言葉が似た関係ない場面が上位に来てしまうため。
-    // 「覚えてないの？」のような短い追いかけ質問の時だけ、直前の流れから話題を借りる
-    const ctxGrams = (grams.length >= 8) ? [] : contentGrams(unName(ctxText)).filter(g => grams.indexOf(g) === -1);
-    if (dbg){ dbg.grams = grams.length; dbg.ctxN = ctxGrams.length; }
-    if (grams.length + ctxGrams.length < 2){ if (dbg) dbg.reason = '探す手がかりになる言葉（カタカナ・漢字・英数字）が少なすぎる'; return ''; }
+    const ctxGrams = contentGrams(unName(ctxText)).filter(g => grams.indexOf(g) === -1);
+    if (grams.length + ctxGrams.length < 2) return '';
     const score = (tx) => relScore(grams, tx) + relScore(ctxGrams, tx) * 0.5;
 
     const who = m => (m.role === 'model' ? cname : (uname || '私'));
@@ -1412,13 +1440,11 @@
     const scan = (list, srcId, limitBack) => {
       const clean = list.filter(m => m && !m.hidden && !m.diary && !m.imgp && (m.text || '').trim());
       const maxI = clean.length - (limitBack || 0);
-      if (dbg){ if (srcId === 'here') dbg.hereScanned = Math.max(0, maxI); else dbg.otherRooms++; }
       clean.forEach((m, i) => {
         if (i >= maxI) return;
         const tx = m.text;
         if (tx.replace(/\s/g, '').length < 8) return;
         const s = score(tx);
-        if (dbg && s > 0) dbg.all.push({ s: s, src: srcId, text: tx, ts: m.ts || 0 });
         if (s >= need) hits.push({ s: s, src: srcId, arr: clean, i: i, ts: m.ts || 0 });
       });
     };
@@ -1433,7 +1459,6 @@
         scan(h, t.id);
       });
     }
-    if (dbg) dbg.hitN = hits.length;
     if (!hits.length) return '';
     hits.sort((a, b) => (b.s - a.s) || (b.ts - a.ts));
     // 見つけた場面＋その後の流れを1セットにして、最大3セット
@@ -1471,12 +1496,11 @@
       for (let j = start; j <= end; j++){
         used[key(j)] = true;
         const m = arr[j];
-        const lim = isHit[key(j)] ? 320 : 120;
-        lines.push(who(m) + '：' + (m.text.length > lim ? m.text.slice(0, lim) + '…' : m.text));
+        lines.push(who(m) + '：' + (m.text.length > 120 ? m.text.slice(0, 120) + '…' : m.text));
       }
       const block = lines.join('\n');
       // 全部で2400字くらいまで（API代を増やしすぎない）
-      if (sets.length && sets.join('').length + block.length > 3200) break;
+      if (sets.length && sets.join('').length + block.length > 2400) break;
       sets.push(block);
     }
     return sets.join('\n―――\n');
@@ -1546,6 +1570,9 @@
     if (/gemma/i.test(get(LS.model,''))){
       out += '\n\n【出力ルール（厳守）】1文字目から日本語の本文（セリフと（ト書き））だけを書き始めること。英語での思考・下書き・チェックリスト・分析・箇条書きは、どんな形でも絶対に出力しない。本文は一度だけ書く（同じ文章を二度繰り返さない）。「Action:」「Dialogue:」のようなラベルや見出し、行頭の記号（*・-）も一切使わない。';
     }
+    if (/argon/i.test(get(LS.model,''))){
+      out += '\n\n【出力ルール（厳守）】返事は1文字目からキャラクターの本文だけを書く。「思考過程」などの見出し・ラベル、中国語や英語の注釈・分析メモは、どんな形でも絶対に出力しない。';
+    }
     return out;
   }
 
@@ -1593,7 +1620,7 @@
       if (m.imgp){ addPromptBubble(m.text, false); return; }
       let el;
       if (m.diary) el = addDiaryBubble(m.text, false, m.label, m.ts);
-      else el = addBubble(m.role === 'model' ? 'ai' : 'user', m.role === 'model' ? stripMd(m.text) : m.text, false, m.ts);
+      else el = addBubble(m.role === 'model' ? 'ai' : 'user', m.role === 'model' ? stripThoughtLabels(stripMd(m.text)) : m.text, false, m.ts);
       if (el) el.dataset.hidx = idx;
     });
     scrollBottom();
@@ -1701,55 +1728,10 @@
     setTimeout(updateToBottom, 400);
   });
 
-  const HIST_KEEP = 600;    // 保存する「見える会話」の数（裏の指示はこの数に入れない）
-  const HIST_HARD = 900;    // 裏の指示も含めた絶対の上限（容量の暴走防止）
-  function capForSave(arr){
-    let out = arr;
-    let vis = 0;
-    out.forEach(m => { if (!m.hidden) vis++; });
-    if (vis > HIST_KEEP){
-      const skip = vis - HIST_KEEP;
-      let seen = 0, cut = 0;
-      for (let i = 0; i < out.length; i++){
-        if (!out[i].hidden){
-          if (seen === skip){ cut = i; break; }
-          seen++;
-        }
-      }
-      out = out.slice(cut);
-    }
-    if (out.length > HIST_HARD) out = out.slice(-HIST_HARD);
-    return out;
-  }
-
-  // 今の会話（cur）にバックアップの会話（bak）を足す。今の会話は1通も消さない。時刻順に並べ直す
-  function mergeHistories(cur, bak){
-    const keyOf = m => (m.role || '') + '|' + (m.ts || 0) + '|' + String(m.text || '').slice(0, 80);
-    const have = {};
-    cur.forEach(m => { have[keyOf(m)] = true; });
-    const add = [];
-    bak.forEach(m => {
-      if (!m || typeof m.text !== 'string') return;
-      const k = keyOf(m);
-      if (have[k]) return;
-      have[k] = true;
-      add.push(m);
-    });
-    const vis = add.filter(m => !m.hidden && !m.imgp);
-    if (!vis.length) return { merged: cur, added: add.length, addedVisible: 0, minTs: 0, maxTs: 0 };
-    const tagged = cur.concat(add).map((m, i) => ({ m: m, i: i }));
-    tagged.sort((a, b) => ((a.m.ts || 0) - (b.m.ts || 0)) || (a.i - b.i));
-    const tss = vis.map(m => m.ts || 0).filter(Boolean);
-    return {
-      merged: tagged.map(x => x.m), added: add.length, addedVisible: vis.length,
-      minTs: tss.length ? Math.min.apply(null, tss) : 0, maxTs: tss.length ? Math.max.apply(null, tss) : 0
-    };
-  }
-
   function saveHistory(){
-    // 上限を超えた分は保存時だけ切り詰める（メモリ上の history は触らない）
-    // → 画面上のバブルの hidx がズレなくなる。上限は見える会話600通（裏の指示は数えない）
-    const toSave = capForSave(history);
+    // 200件を超えた分は保存時だけ切り詰める（メモリ上の history は触らない）
+    // → 画面上のバブルの hidx がズレなくなる
+    const toSave = history.length > 200 ? history.slice(-200) : history;
     try {
       localStorage.setItem(histKey(curId), JSON.stringify(toSave));
     } catch(e){
@@ -1873,7 +1855,7 @@
     // 会話履歴を共通形式に
     const turns = history.filter(m => !m.imgp).slice(-histDepth()).map(m => ({
       role: m.role === 'model' ? 'assistant' : 'user',
-      text: m.text
+      text: m.role === 'model' ? stripThoughtLabels(m.text) : m.text
     }));
     if (extraHiddenPrompt) turns.push({ role:'user', text: extraHiddenPrompt });
 
@@ -1939,7 +1921,7 @@
       if (!apiKey) throw new Error('GeminiのAPIキーが未設定だよ。⚙︎で入れてね');
       const msgs = history.filter(m => !m.imgp).slice(-histDepth()).map(m => ({
         role: m.role,
-        parts: [{ text: m.text }]
+        parts: [{ text: m.role === 'model' ? stripThoughtLabels(m.text) : m.text }]
       }));
       if (extraHiddenPrompt){
         msgs.push({ role:'user', parts:[{ text: extraHiddenPrompt }] });
@@ -1982,7 +1964,7 @@
       url = 'https://generativelanguage.googleapis.com/v1beta/models/' +
         encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(apiKey);
       headers = { 'Content-Type':'application/json' };
-      extract = d => { try { return d.candidates[0].content.parts.map(pp => pp.text || '').join(''); } catch(e){ return ''; } };
+      extract = d => { try { return d.candidates[0].content.parts.filter(pp => !pp.thought).map(pp => pp.text || '').join(''); } catch(e){ return ''; } };
     }
 
     // 一時的なエラー（混雑・500系）は少し待って自動リトライ
@@ -2027,7 +2009,7 @@
         const gKey = get(LS.key,'');
         let convo = fullSystemPrompt() + '\n\n【これまでの会話】\n';
         history.filter(m => !m.imgp).slice(-histDepth()).forEach(m => {
-          convo += (m.role === 'model' ? '相手' : 'ユーザー') + '：' + m.text + '\n';
+          convo += (m.role === 'model' ? '相手' : 'ユーザー') + '：' + (m.role === 'model' ? stripThoughtLabels(m.text) : m.text) + '\n';
         });
         if (extraHiddenPrompt) convo += 'ユーザー：' + extraHiddenPrompt + '\n';
         convo += '\n上記の人物設定になりきり、この会話の続きとして、あなた（相手側）の次の返事の本文だけを出力してください。';
@@ -2062,6 +2044,7 @@
           ({'＝':'=','？':'?','＆':'&','／':'/','：':':','．':'.','＋':'+'}[c])));
       reply = reply.replace(/\n{3,}/g, '\n\n'); // 空行の連発は2行までに圧縮
       reply = stripMd(reply);                      // **太字** などの記号を取り除く
+      reply = stripThoughtLabels(reply);           // 「思考過程」の見出し漏れを取り除く
     }
     if (reply) markModelUsed(model);
     if (reply && provider === 'gemini' && /gemma/i.test(model)) reply = stripLeak(reply);
@@ -2315,99 +2298,6 @@
       return t.slice(0, Math.floor(t.length / 2)).trim();
     }
     return t;
-  }
-
-  // 🕸 思い出し診断：「この聞き方なら、昔の会話の何が何点で拾われて、何が渡るか」を画面に出す（API代0円・会話には残らない）
-  function buildDiagText(dbg, xr){
-    const L = [];
-    const q = (dbg.query || '').replace(/\s+/g, ' ');
-    L.push('探した文：「' + (q.length > 60 ? q.slice(0, 60) + '…' : q) + '」');
-    if (!dbg.th){
-      L.push('・🕸の設定：しない → 昔の会話を探してないよ。⚙︎🔔ふるまいで「しっかり」にしてね');
-      return L.join('\n');
-    }
-    L.push('・🕸の設定：' + (dbg.need >= 8 ? '控えめ' : 'しっかり') + '（合格' + dbg.need + '点）');
-    if (dbg.reason){
-      L.push('・探さなかった理由：' + dbg.reason);
-      return L.join('\n');
-    }
-    L.push('・探せる範囲：この部屋の ' + (dbg.hereScanned || 0) + '通（直近' + dbg.depth + '通は最初から見えてるので除く）' +
-      (dbg.otherRooms ? ' ＋ ほかの部屋 ' + dbg.otherRooms + 'つ' : ''));
-    L.push('・手がかり：' + (dbg.grams || 0) + '個' + (dbg.ctxN ? ' ＋ 直前の流れ ' + dbg.ctxN + '個' : '（直前の流れは混ぜてない）'));
-    L.push('・合格点以上の場面：' + (dbg.hitN || 0) + '件');
-    const top = (dbg.all || []).slice().sort((a, b) => (b.s - a.s) || (b.ts - a.ts)).slice(0, 4);
-    if (top.length){
-      L.push('・点数の高い発言（上位）：');
-      top.forEach((x, i) => {
-        const t = x.text.replace(/\s+/g, ' ');
-        L.push('  ' + (i + 1) + '. ' + (x.s >= dbg.need ? '◎' : '×') + ' ' + (Math.round(x.s * 10) / 10) + '点 ' +
-          (x.src === 'here' ? 'この部屋' : 'ほかの部屋') + (x.ts ? ' ' + fmtDate(x.ts).replace(/^\d+年/, '') : '') +
-          '「' + (t.length > 40 ? t.slice(0, 40) + '…' : t) + '」');
-      });
-    } else {
-      L.push('・点数がついた発言：0件（探せる範囲に、手がかりの言葉を含む発言がなかったよ）');
-    }
-    L.push('');
-    L.push(xr ? '▼実際に渡る文面（' + xr.length + '字）\n' + xr : '▼何も渡らない（合格点の場面がなかったよ）');
-    return L.join('\n');
-  }
-
-  function addDiagBubble(text){
-    const hint = chatEl.querySelector('.empty-hint');
-    if (hint) hint.remove();
-    const d = document.createElement('div');
-    d.className = 'msg memo';
-    const label = document.createElement('div');
-    label.className = 'memo-label';
-    label.textContent = '🕸 思い出し診断（この結果は会話に残らないよ）';
-    const body = document.createElement('div');
-    body.textContent = text;
-    body.style.whiteSpace = 'pre-wrap';
-    const cp = document.createElement('button');
-    cp.className = 'copy-btn';
-    cp.textContent = '📋 コピー';
-    cp.addEventListener('click', async () => {
-      try {
-        await navigator.clipboard.writeText(text);
-        cp.textContent = '✓ コピーした！';
-        setTimeout(() => { cp.textContent = '📋 コピー'; }, 1200);
-      } catch(e){}
-    });
-    const close = document.createElement('button');
-    close.className = 'copy-btn';
-    close.style.marginLeft = '8px';
-    close.textContent = '✕ 閉じる';
-    close.addEventListener('click', () => d.remove());
-    d.appendChild(label); d.appendChild(body); d.appendChild(cp); d.appendChild(close);
-    chatEl.appendChild(d);
-    scrollToMsg(d);
-  }
-
-  function runDiag(){
-    if (busy) return;
-    const raw = window.prompt('どんな聞き方をした想定で探す？\n例：ユニクロで試着した時のサイズ覚えてる？\n（空欄＝いまの会話の、自分の最後のメッセージで探す）', '');
-    if (raw === null) return;
-    const typed = raw.trim();
-    const dbg = {};
-    let xr = '';
-    const saved = history;
-    try {
-      if (typed){
-        // 「いま送った」ことにして探す（本物の会話には何も足さない）
-        history = saved.concat([{ role:'user', text: typed, ts: Date.now() }]);
-        dbg.query = typed;
-      } else {
-        dbg.query = lastUserText();
-      }
-      if (!dbg.query){ addBubble('error','探す文がないよ。聞き方を入力してみてね'); return; }
-      xr = crossRoomContext(dbg);
-    } catch(e){
-      addBubble('error','診断でエラー: ' + e.message);
-      return;
-    } finally {
-      history = saved;
-    }
-    addDiagBubble(buildDiagText(dbg, xr));
   }
 
   function addPromptBubble(text, save){
@@ -3830,59 +3720,6 @@
     reader.readAsText(file);
   });
 
-  /* ---------- 会話だけ合流（今の会話は消さずに、バックアップ側にだけある昔の分を足す） ---------- */
-  const mergeInput = document.getElementById('mergeInput');
-  document.getElementById('mergeBtn').addEventListener('click', () => {
-    if (busy){ alert('いま返事を待っている途中だよ。返事が来てからもう一度押してね'); return; }
-    mergeInput.click();
-  });
-  mergeInput.addEventListener('change', () => {
-    const file = mergeInput.files && mergeInput.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const dump = JSON.parse(reader.result);
-        const pre = KP + 'hist_';
-        const plans = [];
-        Object.keys(dump).filter(k => k.indexOf(pre) === 0).forEach(k => {
-          const id = k.slice(pre.length);
-          const th = threads.find(t => t.id === id);
-          if (!th) return;                       // いまは無い部屋には触らない
-          let bak = [];
-          try { bak = JSON.parse(dump[k] || '[]'); } catch(e){ return; }
-          if (!Array.isArray(bak)) return;
-          let cur = [];
-          if (id === curId) cur = history;
-          else { try { cur = JSON.parse(localStorage.getItem(histKey(id)) || '[]'); } catch(e){ cur = []; } }
-          const r = mergeHistories(cur, bak);
-          if (r.addedVisible > 0) plans.push({ id: id, th: th, r: r });
-        });
-        if (!plans.length){
-          alert('足せる会話は見つからなかったよ。\nこのバックアップにはない、または今の会話にもう全部入ってるみたい。別の日のバックアップがあれば、そっちも試してみてね');
-          return;
-        }
-        const lines = plans.map(p => '・「' + p.th.name + '」に ' + p.r.addedVisible + '通' +
-          (p.r.minTs ? '（' + fmtDate(p.r.minTs) + ' ' + fmtTime(p.r.minTs) + ' 〜 ' + fmtDate(p.r.maxTs) + ' ' + fmtTime(p.r.maxTs) + '）' : ''));
-        if (!confirm('バックアップにだけ残っていた会話が見つかったよ：\n' + lines.join('\n') + '\n\n今の会話はそのまま残して、時刻順に足すね。合流する？')) return;
-        let failed = 0;
-        plans.forEach(p => {
-          const out = capForSave(p.r.merged);
-          try { localStorage.setItem(histKey(p.id), JSON.stringify(out)); }
-          catch(e){ failed++; return; }
-          if (p.id === curId) history = out;
-        });
-        renderAll();
-        if (failed) alert('一部の部屋は容量がいっぱいで足せなかったよ…⚙︎💾の容量メーターを見てね');
-        else { alert('合流したよ！上までスクロールして確かめてみてね📜'); closeSheets(); }
-      } catch(e){
-        alert('読み込めなかった…バックアップファイルか確認してみて（' + e.message + '）');
-      }
-      mergeInput.value = '';
-    };
-    reader.readAsText(file);
-  });
-
   document.getElementById('clearBtn').addEventListener('click', () => {
     const t = curThread();
     if (confirm('「' + (t ? t.name : '') + '」の履歴を消す？（思い出ノートと設定は残るよ）')){
@@ -4344,11 +4181,6 @@
     makeImagePrompt();
   });
 
-  document.getElementById('diagBtn').addEventListener('click', () => {
-    closeSheets();
-    runDiag();
-  });
-
   document.getElementById('favBtn').addEventListener('click', () => {
     closeSheets();
     renderFavs();
@@ -4796,7 +4628,7 @@
       if (thinkLow && /gemini-3/i.test(model)) body.generationConfig = { thinkingConfig: { thinkingLevel: 'low' } };
       url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(key);
       headers = { 'Content-Type':'application/json' };
-      extract = d => { try { return d.candidates[0].content.parts.map(pp => pp.text || '').join(''); } catch(e){ return ''; } };
+      extract = d => { try { return d.candidates[0].content.parts.filter(pp => !pp.thought).map(pp => pp.text || '').join(''); } catch(e){ return ''; } };
     }
 
     // 混雑・500系は少し待って自動リトライ（最大3回）
@@ -4862,7 +4694,7 @@
       } catch(e){}
       throw new Error(why || '返事が空だったよ');
     }
-    raw = stripMd(raw).replace(/\n{3,}/g, '\n\n');
+    raw = stripThoughtLabels(stripMd(raw)).replace(/\n{3,}/g, '\n\n');
     if (provider === 'gemini' && /gemma/i.test(model)){
       try { raw = stripLabels(stripLeak(raw)); } catch(e){}
     }
